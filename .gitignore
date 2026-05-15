@@ -1,0 +1,14 @@
+#IDE
+.vscode/
+.idea/
+
+# build files
+target/
+build/
+out/
+
+# Java compiled files
+*.class
+
+# log filess
+*.log
