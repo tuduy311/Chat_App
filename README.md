@@ -18,6 +18,8 @@ Xây dựng 1 chương trình chat với Java với các chức năng sau:
 
 ## Cấu trúc dự án
 
+```
+
 ChatApp/
 ├── src/
 │   ├── main/
@@ -36,3 +38,5 @@ ChatApp/
 ├── pom.xml                       # Maven config
 ├── README.md                     # project description
 ├── .gitignore                    # ignore file
+
+```

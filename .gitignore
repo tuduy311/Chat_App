@@ -9,6 +9,3 @@ out/
 
 # Java compiled files
 *.class
-
-# log filess
-*.log

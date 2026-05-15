@@ -2,28 +2,52 @@ package server;
 
 import java.io.*;
 import java.net.*;
+import java.util.*;
 
 public class Server {
+
+    static List<Socket> clients = new ArrayList<>();
+
     public static void main(String[] args) {
+
+        
         try {
-            ServerSocket serverSocket = new ServerSocket(8080);
+            ServerSocket server = new ServerSocket(8080);
             System.out.println("Server is listening on port 8080 ...");
 
-            Socket socket = serverSocket.accept();
-            System.out.println("Client connected: " + socket.getInetAddress());
+            while (true) {
+                Socket socket = server.accept();
+                System.out.println("Client connected: " + socket.getInetAddress());
+                clients.add(socket);
 
-            BufferedReader br = new BufferedReader(
-                                 new InputStreamReader(socket.getInputStream()));
+                // moi client 1 thread
+                new ClientHandler(socket).start();
+            }
 
-            String mess = br.readLine();
-            System.out.println("Client says: " + mess);
-
-
-            socket.close();
-            serverSocket.close();
+            
         }
+       
         catch (Exception e) {
             e.printStackTrace();
         }
+       
     }
+
+    public static void broadcast(String message, Socket sender) {
+        for (Socket s : clients) {
+            try {
+                PrintWriter out = new PrintWriter(s.getOutputStream(), true);
+                if (s == sender) continue; // khong gui lai cho client gui
+                out.println(message);
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public static void removeClient(Socket socket) {
+        clients.remove(socket);
+    }
+
 }
