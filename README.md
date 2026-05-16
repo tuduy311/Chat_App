@@ -26,12 +26,10 @@ ChatApp/
 │   │   ├── java/
 │   │       ├── server/        # Server (Socket, Thread, ClientHandler)
 │   │       ├── client/        # Client connection logic
-│   │       ├── gui/           # Swing UI (Login, Chat window)
 │   │       ├── model/        # DTO (User, Message,...)
 │   │       ├── service/      # Business logic (Auth, ChatService,...)
 │   │       ├── db/           # JDBC / Database connection
 │   │       └── util/         # Constants, helper, enums
-│   │   
 │   │
 │   └── test/                     # test code (optional)
 │
