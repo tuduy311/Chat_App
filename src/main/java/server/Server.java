@@ -7,10 +7,10 @@ import java.util.*;
 public class Server {
 
     static List<Socket> clients = new ArrayList<>();
+    static Map<Socket, String> userMap = new HashMap<>();
 
     public static void main(String[] args) {
 
-        
         try {
             ServerSocket server = new ServerSocket(8080);
             System.out.println("Server is listening on port 8080 ...");
@@ -18,13 +18,14 @@ public class Server {
             while (true) {
                 Socket socket = server.accept();
                 System.out.println("Client connected: " + socket.getInetAddress());
+                
                 clients.add(socket);
 
                 // moi client 1 thread
                 new ClientHandler(socket).start();
-            }
 
-            
+            }
+ 
         }
        
         catch (Exception e) {

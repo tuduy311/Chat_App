@@ -17,7 +17,10 @@ public class chatClientUI extends JFrame {
     PrintWriter pw;
     BufferedReader br;
 
+    String username;
+
     public chatClientUI() {
+       
         initUI();
         connectServer();
         receiveMessages();
@@ -50,6 +53,8 @@ public class chatClientUI extends JFrame {
         inputField.addActionListener(e -> sendMessage());
 
         setVisible(true);
+
+        username = JOptionPane.showInputDialog("Enter username:");
     }
 
     
@@ -63,7 +68,9 @@ public class chatClientUI extends JFrame {
                     new InputStreamReader(socket.getInputStream()));
 
             chatArea.append("Connected to the server ...\n");
-           // Scaner sc = new Scaner(System.in);
+
+            // Gui username truoc khi chat
+            pw.println(username);
 
         }
         catch(Exception e) {
@@ -86,7 +93,7 @@ public class chatClientUI extends JFrame {
             try {
                 String msg;
                 while ((msg = br.readLine()) != null) {
-                    chatArea.append("Friend: " + msg + "\n"); 
+                    chatArea.append(msg + "\n"); 
                 }
 
                 // tu dong scroll xuong cuoi khi co message moi
