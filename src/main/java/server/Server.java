@@ -7,7 +7,10 @@ import java.util.*;
 public class Server {
 
     static List<Socket> clients = new ArrayList<>();
+    // xem user online
     static Map<Socket, String> userMap = new HashMap<>();
+    // chat private tung user
+    static Map<String, Socket> nameToSocket = new HashMap<>();
 
     public static void main(String[] args) {
 
@@ -17,8 +20,7 @@ public class Server {
 
             while (true) {
                 Socket socket = server.accept();
-                System.out.println("Client connected: " + socket.getInetAddress());
-                
+
                 clients.add(socket);
 
                 // moi client 1 thread
@@ -47,8 +49,22 @@ public class Server {
         }
     }
 
+    public static void broadcastOnline() {
+       String users = "ONLINE:" + String.join(",", userMap.values());
+        for (Socket s : clients) {
+            try {
+                PrintWriter out = new PrintWriter(s.getOutputStream(), true);
+                out.println(users);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
     public static void removeClient(Socket socket) {
         clients.remove(socket);
     }
+
+    
 
 }

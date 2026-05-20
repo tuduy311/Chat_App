@@ -4,38 +4,88 @@ import java.io.*;
 import java.net.*;
 
 public class ClientHandler extends Thread {
-    
+
     Socket socket;
+    BufferedReader br;
+    PrintWriter pw;
+    String username;
 
     public ClientHandler(Socket socket) {
         this.socket = socket;
     }
 
+    private void handlePrivateMessage(String message) {
+        try {
+            // format: /msg username "message"
+            String[] parts = message.split(" ", 3);
+
+            if (parts.length < 3) return;
+
+            String user = parts[1];
+            String msg = parts[2];
+
+            Socket targetSocket = Server.nameToSocket.get(user);
+            if (targetSocket == null) {
+                pw.println("[System] User " + user + " not found");
+                return;
+            }
+
+            PrintWriter targetOut = new PrintWriter(targetSocket.getOutputStream(), true);
+            targetOut.println("[Private] from " + username + ": " + msg);
+            
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     public void run() {
         try {
-            BufferedReader br = new BufferedReader (
+            br = new BufferedReader (
                 new InputStreamReader(socket.getInputStream()));
+            pw = new PrintWriter(socket.getOutputStream(), true);
 
-            String username = br.readLine(); // dòng đầu tiên
+            username = br.readLine(); // dòng đầu tiên lấy username
+
             Server.userMap.put(socket, username);
             System.out.println("User connected: " + username);
+
+            Server.nameToSocket.put(username, socket);
+
+            Server.broadcastOnline();
+            Server.broadcast("[SYSTEM] " + username + " joined", socket);
           
             String message;
             while ((message = br.readLine()) != null) {
-                String user = Server.userMap.get(socket);
+                 // nếu muốn command /list
+                if (message.equals("/list")) {
+                    pw.println("ONLINE:" + String.join(",", Server.userMap.values()));
+                    continue;
+                }
 
-                System.out.println(user + ": " + message);
-                Server.broadcast(user + ": " + message, socket);
+                if (message.startsWith("/msg")) {
+                    handlePrivateMessage(message);
+                    continue;
+                }
+
+                System.out.println(username + ": " + message);
+                Server.broadcast(username + ": " + message, socket);
             }
+            
+
         }
         catch (Exception e) {
-            System.out.println("Client disconnected: " + socket);
+           // e.printStackTrace();
+            System.out.println(username + " disconnected");
         }
         finally {
             try {
-                socket.close();
+                Server.userMap.remove(socket);
                 Server.removeClient(socket);
+                socket.close();
+               // Server.broadcast("[SYSTEM] " + user + " left", socket);
+                Server.broadcastOnline();
             }
             catch (Exception e) {
                 e.printStackTrace();

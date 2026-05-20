@@ -12,6 +12,7 @@ public class chatClientUI extends JFrame {
     JTextArea chatArea;
     JTextField inputField;
     JButton sendBtn;
+    JTextArea onlineArea;
 
     Socket socket;
     PrintWriter pw;
@@ -20,6 +21,7 @@ public class chatClientUI extends JFrame {
     String username;
 
     public chatClientUI() {
+        username = JOptionPane.showInputDialog("Enter username:");
        
         initUI();
         connectServer();
@@ -28,14 +30,26 @@ public class chatClientUI extends JFrame {
 
     private void initUI() {
         setTitle("ChatApp");
-        setSize(400, 500);
+        setSize(700, 500);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+       
         setLayout(new BorderLayout());
 
-        // Chat area
+        // ____________ Left panel: Online users _______________
+        onlineArea = new JTextArea();
+        onlineArea.setEditable(false);
+
+        JScrollPane leftPanel = new JScrollPane(onlineArea);
+
+
+        // ___________ Right panel: Chat area __________________
+        JPanel rightPanel = new JPanel();
+        rightPanel.setLayout(new BorderLayout());
+
         chatArea = new JTextArea();
         chatArea.setEditable(false);
-        add(new JScrollPane(chatArea), BorderLayout.CENTER);
+        
+        JScrollPane chatPane = new JScrollPane(chatArea);
 
         // Bottom panel
         JPanel bottom = new JPanel();
@@ -46,15 +60,28 @@ public class chatClientUI extends JFrame {
         bottom.add(inputField, BorderLayout.CENTER);
         bottom.add(sendBtn, BorderLayout.EAST);
 
-        add(bottom, BorderLayout.SOUTH);
+        //add(bottom, BorderLayout.SOUTH);
+
+        rightPanel.add(chatPane, BorderLayout.CENTER);
+        rightPanel.add(bottom, BorderLayout.SOUTH);
+
+
+
+        // split UI
+        JSplitPane splitPane = new JSplitPane(
+            JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel
+        );
+        splitPane.setDividerLocation(200);
+        add(splitPane, BorderLayout.CENTER);
+
+
 
         // send event
         sendBtn.addActionListener(e -> sendMessage());
         inputField.addActionListener(e -> sendMessage());
 
         setVisible(true);
-
-        username = JOptionPane.showInputDialog("Enter username:");
+        
     }
 
     
@@ -67,7 +94,7 @@ public class chatClientUI extends JFrame {
             br = new BufferedReader( 
                     new InputStreamReader(socket.getInputStream()));
 
-            chatArea.append("Connected to the server ...\n");
+            chatArea.append("Connected as: " + username + "\n");
 
             // Gui username truoc khi chat
             pw.println(username);
@@ -93,7 +120,20 @@ public class chatClientUI extends JFrame {
             try {
                 String msg;
                 while ((msg = br.readLine()) != null) {
-                    chatArea.append(msg + "\n"); 
+                    if (msg.startsWith("ONLINE:")) {
+
+                    String users = msg.substring(7);
+
+                    onlineArea.setText("Online Users:\n");
+
+                    for (String u : users.split(",")) {
+                        onlineArea.append("- " + u + "\n");
+                        chatArea.append("- " + u + "\n");
+                    }
+
+                    } else {
+                        chatArea.append(msg + "\n");
+                    }
                 }
 
                 // tu dong scroll xuong cuoi khi co message moi
