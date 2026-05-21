@@ -12,6 +12,9 @@ public class Server {
     // chat private tung user
     static Map<String, Socket> nameToSocket = new HashMap<>();
 
+    static Map<Socket, String> userGroup = new HashMap<>();
+    static Map<String, List<Socket>> groupMember = new HashMap<>();
+
     public static void main(String[] args) {
 
         try {
@@ -65,6 +68,28 @@ public class Server {
         clients.remove(socket);
     }
 
-    
+    public static void broadcastGroupList(Socket socket) {
+        // Lấy unique groups từ groupMember keys
+        String groupList = "GROUP:" + String.join(",", groupMember.keySet());
+        try { 
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+            out.println(groupList);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
+    public static void broadcastToGroup(String groupName, String message) {
+        List<Socket> member = groupMember.get(groupName);
+        
+        for (Socket s: member) {
+            try {
+                PrintWriter out = new PrintWriter(s.getOutputStream(), true);
+                out.println("[" + groupName + "]: " + message);
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
 }

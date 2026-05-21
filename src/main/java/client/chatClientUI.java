@@ -13,6 +13,7 @@ public class chatClientUI extends JFrame {
     JTextField inputField;
     JButton sendBtn;
     JTextArea onlineArea;
+    JTextArea groupArea;
 
     Socket socket;
     PrintWriter pw;
@@ -38,8 +39,18 @@ public class chatClientUI extends JFrame {
         // ____________ Left panel: Online users _______________
         onlineArea = new JTextArea();
         onlineArea.setEditable(false);
+        groupArea = new JTextArea();
+        groupArea.setEditable(false);
 
-        JScrollPane leftPanel = new JScrollPane(onlineArea);
+        //JScrollPane leftPanel = new JScrollPane(onlineArea);
+        JPanel leftPanel = new JPanel();
+        leftPanel.setLayout(new GridLayout(2, 1));
+
+        JScrollPane onlineScroll = new JScrollPane(onlineArea);
+        JScrollPane groupScroll = new JScrollPane(groupArea);
+
+        leftPanel.add(onlineScroll);
+        leftPanel.add(groupScroll);
 
 
         // ___________ Right panel: Chat area __________________
@@ -111,7 +122,10 @@ public class chatClientUI extends JFrame {
          
         pw.println(msg);
         System.out.println(pw);
-        chatArea.append("Me: " + msg + "\n");
+        //chatArea.append("Me: " + msg + "\n");
+        if (!msg.startsWith("/") || !msg.startsWith("/msg")) {
+            chatArea.append("Me: " + msg + "\n");
+        }
         inputField.setText("");
     }
 
@@ -121,17 +135,26 @@ public class chatClientUI extends JFrame {
                 String msg;
                 while ((msg = br.readLine()) != null) {
                     if (msg.startsWith("ONLINE:")) {
+                        String users = msg.substring(7);
+                        onlineArea.setText("Online:\n");
 
-                    String users = msg.substring(7);
+                        for (String u : users.split(",")) {
+                            onlineArea.append("- " + u + "\n");
+                        }
 
-                    onlineArea.setText("Online Users:\n");
-
-                    for (String u : users.split(",")) {
-                        onlineArea.append("- " + u + "\n");
-                        chatArea.append("- " + u + "\n");
                     }
+                    else if (msg.startsWith("GROUP:")) {
+                        String groups = msg.substring(6);
+                        groupArea.setText("Groups:\n");
 
-                    } else {
+                        if (!groups.isEmpty()) {
+                            for (String g : groups.split(",")) {
+                                groupArea.append("- " + g + "\n");
+                            }
+                        }
+                        //continue;
+                    }
+                    else {
                         chatArea.append(msg + "\n");
                     }
                 }
