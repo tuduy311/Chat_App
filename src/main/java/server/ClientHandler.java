@@ -118,32 +118,7 @@ public class ClientHandler extends Thread {
                     continue;
                 }
 
-                else if (message.startsWith("/")) {
-                    int fistSpace = message.indexOf(" ");
-                    if (fistSpace == -1) {
-                        pw.println("Invalid command");
-                        continue;
-                    }
-                    String groupName = message.substring(1, fistSpace);
-                    if (!Server.groupMember.containsKey(groupName)) {
-                        pw.println("Group does not exist: " + groupName);
-                        continue;
-                    }
-
-                    // CHECK: Verify user ở trong group
-                    String currentGroup = Server.userGroup.get(socket);
-                    if (currentGroup == null || !currentGroup.equals(groupName)) {
-                        pw.println("[System] You are not in this group");
-                        continue;
-                    }
-
-                    String msg = message.substring(fistSpace + 1);
-                    Server.broadcastToGroup(groupName, username + ": " + msg);
-
-                    continue;
-                }
-
-                else if (message.startsWith("/leave")) {
+                else if (message.startsWith("/leave ")) {
                     String[] parts = message.split(" ", 2); 
                         if (parts.length < 2) {
                             pw.println("Usage: /leave groupName");
@@ -168,6 +143,31 @@ public class ClientHandler extends Thread {
                     pw.println("Left group: " + group);
 
                     Server.broadcastGroupList(socket);
+                    continue;
+                }
+
+                else if (message.startsWith("/")) {
+                    int fistSpace = message.indexOf(" ");
+                    if (fistSpace == -1) {
+                        pw.println("Invalid command");
+                        continue;
+                    }
+                    String groupName = message.substring(1, fistSpace);
+                    if (!Server.groupMember.containsKey(groupName)) {
+                        pw.println("Group does not exist: " + groupName);
+                        continue;
+                    }
+
+                    // CHECK: Verify user ở trong group
+                    String currentGroup = Server.userGroup.get(socket);
+                    if (currentGroup == null || !currentGroup.equals(groupName)) {
+                        pw.println("[System] You are not in this group");
+                        continue;
+                    }
+
+                    String msg = message.substring(fistSpace + 1);
+                    Server.broadcastToGroup(groupName, username + ": " + msg);
+
                     continue;
                 }
             }

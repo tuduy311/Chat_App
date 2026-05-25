@@ -123,7 +123,7 @@ public class chatClientUI extends JFrame {
         pw.println(msg);
         System.out.println(pw);
         //chatArea.append("Me: " + msg + "\n");
-        if (!msg.startsWith("/") || !msg.startsWith("/msg")) {
+        if (!msg.startsWith("/") || msg.startsWith("/msg")) {
             chatArea.append("Me: " + msg + "\n");
         }
         inputField.setText("");
