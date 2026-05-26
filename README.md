@@ -66,7 +66,6 @@ chat_app/
 - [ ] File transfer
 
 ## Setup
-
 ### 1. Yêu cầu
 - Java 11+
 - Maven 3.6+
@@ -83,7 +82,6 @@ Mở **MySQL Workbench** hoặc command line:
 ```
 
 Hoặc dùng command line:
-
 ```powershell
 mysql -u root -p < database\schema.sql
 -- Nhập password khi được yêu cầu
@@ -92,81 +90,27 @@ mysql -u root -p < database\schema.sql
 ### 3. Cấu hình Environment (.env)
 
 Copy `.env.example` thành `.env`:
-
 ```powershell
 copy .env.example .env
 ```
 
 Edit `.env` file với MySQL credentials:
-
 ```env
 DB_URL=jdbc:mysql://localhost:3306/chat_app
 DB_USER=root
 DB_PASSWORD=your_mysql_password
 ```
 
-**⚠️ QUAN TRỌNG**: 
-- `.env` được thêm vào `.gitignore` - không commit password!
-- Mỗi developer có `.env` riêng với credentials của họ
-
 ### 4. Build Project
 
 ```powershell
-cd C:\Users\tuduy\Documents\Java\chat_app
+cd ....\chat_app
 
 # Cài dependencies & build
 mvn clean install
 
-# Build mà không test
-mvn clean install -DskipTests
-```
 
-## Chạy Ứng Dụng
-
-### Start Server
-
-```powershell
-mvn exec:java
-# hoặc
-mvn exec:java -Dexec.mainClass="server.Server"
-```
-
-Output khi thành công:
-```
-SQL Server JDBC Driver loaded successfully
-✓ Database connection successful!
-Server started on port 8080
-Waiting for clients...
-```
-
-### Start Client GUI
-
-Mở terminal thứ 2:
-
-```powershell
-mvn exec:java -Dexec.mainClass="client.chatClientUI"
-```
-
-## Test Commands
-
-### 1. Build & Compile Test
-```powershell
-# Compile mã
-mvn compile
-
-# Check syntax
-mvn validate
-```
-
-### 2. Package Test
-```powershell
-# Tạo JAR file
-mvn package
-
-# JAR file ở target/chat_app-1.0.jar
-```
-
-### 3. Database Connection Test
+### Database Connection Test
 
 Tạo file test:
 
@@ -185,28 +129,33 @@ public class TestConnection {
 
 Chạy:
 ```powershell
-mvn exec:java -Dexec.mainClass="db.TestConnection"
+mvn exec:java "-Dexec.mainClass=db.TestConnection"
 ```
 
-### 4. Unit Test
-```powershell
-# Chạy tất cả tests
-mvn test
+## Chạy Ứng Dụng
 
-# Chạy test class cụ thể
-mvn test -Dtest=ServerTest
-```
+### Start Server
 
-### 5. Integration Test (Manual)
 ```powershell
-# Terminal 1: Start server
 mvn exec:java
+# hoặc
+mvn exec:java "-Dexec.mainClass=server.Server"
+```
 
-# Terminal 2: Start client 1
-mvn exec:java -Dexec.mainClass="client.chatClientUI"
+Output khi thành công:
+```
+SQL Server JDBC Driver loaded successfully
+✓ Database connection successful!
+Server started on port 8080
+Waiting for clients...
+```
 
-# Terminal 3: Start client 2
-mvn exec:java -Dexec.mainClass="client.chatClientUI"
+### Start Client GUI
+
+Mở terminal thứ 2:
+
+```powershell
+mvn exec:java "-Dexec.mainClass=client.chatClientUI"
 ```
 
 Test commands trong client:
@@ -215,82 +164,7 @@ Test commands trong client:
 /createGroup groupname     # Tạo group
 /join groupname           # Join group
 /leave groupname          # Leave group
-groupname message         # Gửi message vào group
-```
-
-### 6. Build Jar & Run Standalone
-```powershell
-# Build
-mvn clean package
-
-# Run server từ JAR
-java -cp target/chat_app-1.0.jar server.Server
-
-# Run client từ JAR
-java -cp target/chat_app-1.0.jar client.chatClientUI
-```
-
-### 7. Clean Build
-```powershell
-# Xóa compiled files
-mvn clean
-
-# Clean + rebuild
-mvn clean install
-```
-
-## Troubleshooting
-
-### 1. MySQL Connection Failed
-```
-✗ Database connection failed!
-com.mysql.cj.jdbc.exceptions.CommunicationsException
-```
-
-**Fix**:
-- Kiểm tra MySQL đang chạy: `mysql -u root -p`
-- Kiểm tra `.env` file có password đúng không
-- Kiểm tra database `chat_app` đã tạo chưa
-
-### 2. JDBC Driver Not Found
-```
-SQL Server JDBC Driver not found!
-```
-
-**Fix**:
-```powershell
-mvn clean install
-```
-
-### 3. Port 8080 Already in Use
-```
-Address already in use
-```
-
-**Fix**:
-```powershell
-# Windows: Tìm process dùng port 8080
-netstat -ano | findstr :8080
-
-# Kill process (thay PID)
-taskkill /PID 1234 /F
-
-# Hoặc sửa port trong Server.java
-private static final int PORT = 8081;
-```
-
-### 4. Class Not Found
-```
-[ERROR] Unknown lifecycle phase ".mainClass=server.Server"
-```
-
-**Fix**: Sử dụng đúng syntax
-```powershell
-# Đúng
-mvn exec:java -Dexec.mainClass="server.Server"
-
-# Sai
-mvn -Dexec.mainClass="server.Server" exec:java
+/groupname message         # Gửi message vào group
 ```
 
 ## Phát Triển Tiếp Theo

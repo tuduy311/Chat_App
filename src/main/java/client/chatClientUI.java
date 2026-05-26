@@ -21,6 +21,15 @@ public class chatClientUI extends JFrame {
 
     String username;
 
+    // Constructor with username parameter (from LoginFrame)
+    public chatClientUI(String username) {
+        this.username = username;
+        initUI();
+        connectServer();
+        receiveMessages();
+    }
+    
+    // Old constructor for backward compatibility (shows prompt)
     public chatClientUI() {
         username = JOptionPane.showInputDialog("Enter username:");
        
@@ -169,6 +178,7 @@ public class chatClientUI extends JFrame {
     }
     
     public static void main(String[] args) {
-        new chatClientUI();
+        // Launch LoginFrame instead of directly showing chat
+        SwingUtilities.invokeLater(() -> new LoginFrame());
     }
 }
