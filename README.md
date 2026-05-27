@@ -165,6 +165,8 @@ Test commands trong client:
 /join groupname           # Join group
 /leave groupname          # Leave group
 /groupname message         # Gửi message vào group
+ /history private username # Load recent private history with username
+ /history group groupname  # Load recent group history
 ```
 
 ## Phát Triển Tiếp Theo

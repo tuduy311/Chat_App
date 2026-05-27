@@ -1,8 +1,10 @@
 package server;
 
+import db.DatabaseManager;
 import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
+import java.util.List;
 
 public class ClientHandler extends Thread {
 
@@ -33,6 +35,16 @@ public class ClientHandler extends Thread {
 
             PrintWriter targetOut = new PrintWriter(targetSocket.getOutputStream(), true);
             targetOut.println("[Private] from " + username + ": " + msg);
+            // Save to database if possible
+            try {
+                Integer senderId = DatabaseManager.getUserIdByUsername(username);
+                Integer receiverId = DatabaseManager.getUserIdByUsername(user);
+                if (senderId != null && receiverId != null) {
+                    DatabaseManager.savePrivateMessage(senderId, receiverId, msg);
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
             
         }
         catch (Exception e) {
@@ -59,6 +71,41 @@ public class ClientHandler extends Thread {
           
             String message;
             while ((message = br.readLine()) != null) {
+                // History request: /history private username OR /history group groupname
+                if (message.startsWith("/history")) {
+                    String[] parts = message.split(" ", 3);
+                    if (parts.length >= 3) {
+                        String type = parts[1];
+                        String target = parts[2];
+                        if (type.equalsIgnoreCase("private")) {
+                            Integer myId = DatabaseManager.getUserIdByUsername(username);
+                            Integer otherId = DatabaseManager.getUserIdByUsername(target);
+                            if (myId != null && otherId != null) {
+                                List<String> hist = DatabaseManager.getPrivateHistory(myId, otherId, 50);
+                                pw.println("[History] Last " + hist.size() + " messages with " + target + ":");
+                                for (int i = hist.size()-1; i >=0; i--) {
+                                    pw.println("[History] " + hist.get(i));
+                                }
+                            } else {
+                                pw.println("[History] No history found or user not found");
+                            }
+                        } else if (type.equalsIgnoreCase("group")) {
+                            Integer groupId = DatabaseManager.getOrCreateGroupId(target);
+                            if (groupId != null) {
+                                List<String> hist = DatabaseManager.getGroupHistory(groupId, 50);
+                                pw.println("[History] Last " + hist.size() + " messages in group " + target + ":");
+                                for (int i = hist.size()-1; i >=0; i--) {
+                                    pw.println("[History] " + hist.get(i));
+                                }
+                            } else {
+                                pw.println("[History] No group history found");
+                            }
+                        }
+                    } else {
+                        pw.println("Usage: /history private username OR /history group groupname");
+                    }
+                    continue;
+                }
                 if (message.startsWith("/msg")) {
                     handlePrivateMessage(message);
                     continue;
@@ -86,6 +133,13 @@ public class ClientHandler extends Thread {
 
                     pw.println("[System] Joined group: " + group);
                     Server.broadcastGroupList(socket);
+
+                    // Persist group in DB
+                    try {
+                        DatabaseManager.getOrCreateGroupId(group);
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
 
                     continue;
                 }
@@ -167,6 +221,17 @@ public class ClientHandler extends Thread {
 
                     String msg = message.substring(fistSpace + 1);
                     Server.broadcastToGroup(groupName, username + ": " + msg);
+
+                    // Save group message to DB
+                    try {
+                        Integer groupId = DatabaseManager.getOrCreateGroupId(groupName);
+                        Integer userId = DatabaseManager.getUserIdByUsername(username);
+                        if (groupId != null && userId != null) {
+                            DatabaseManager.saveGroupMessage(groupId, userId, msg);
+                        }
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
 
                     continue;
                 }
