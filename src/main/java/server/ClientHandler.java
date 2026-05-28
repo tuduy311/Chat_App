@@ -71,7 +71,10 @@ public class ClientHandler extends Thread {
           
             String message;
             while ((message = br.readLine()) != null) {
-                // History request: /history private username OR /history group groupname
+                // Command routing:
+                // - /history, /createGroup, /join, /leave, /delete: system commands from the client command bar
+                // - /msg <user> <text>: private chat from a private tab
+                // - /<group> <text>: group chat from a group tab
                 if (message.startsWith("/history")) {
                     String[] parts = message.split(" ", 3);
                     if (parts.length >= 3) {
@@ -106,11 +109,13 @@ public class ClientHandler extends Thread {
                     }
                     continue;
                 }
+                // Private chat command used by the client private tab.
                 if (message.startsWith("/msg")) {
                     handlePrivateMessage(message);
                     continue;
                 }
 
+                // Create group command from the client command bar.
                 else if (message.startsWith("/createGroup ")) {
                     String group = message.split(" ")[1];
                     if(Server.groupMember.putIfAbsent(group, new ArrayList<>()) == null ) {
@@ -144,6 +149,7 @@ public class ClientHandler extends Thread {
                     continue;
                 }
 
+                // Join group command from the client command bar.
                 else if (message.startsWith("/join")) {
                     String[] parts = message.split(" ", 2);
                     if (parts.length < 2) {
@@ -172,6 +178,7 @@ public class ClientHandler extends Thread {
                     continue;
                 }
 
+                // Leave group command from the client command bar.
                 else if (message.startsWith("/leave ")) {
                     String[] parts = message.split(" ", 2); 
                         if (parts.length < 2) {
@@ -200,6 +207,8 @@ public class ClientHandler extends Thread {
                     continue;
                 }
 
+                // Group chat command used by the client group tab.
+                // Format: /groupName message
                 else if (message.startsWith("/")) {
                     int fistSpace = message.indexOf(" ");
                     if (fistSpace == -1) {
