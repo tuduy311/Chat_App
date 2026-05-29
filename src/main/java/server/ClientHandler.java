@@ -65,7 +65,20 @@ public class ClientHandler extends Thread {
             System.out.println("User connected: " + username);
             Server.nameToSocket.put(username, socket);
 
+            // Restore current memberships from DB so the user only sees active groups.
+            Integer userId = DatabaseManager.getUserIdByUsername(username);
+            if (userId != null) {
+                for (String groupName : DatabaseManager.getGroupsForUser(userId)) {
+                    Server.groupMember.putIfAbsent(groupName, new ArrayList<>());
+                    if (!Server.groupMember.get(groupName).contains(socket)) {
+                        Server.groupMember.get(groupName).add(socket);
+                    }
+                    Server.userGroup.putIfAbsent(socket, groupName);
+                }
+            }
+
             Server.broadcastOnline();
+            Server.broadcastGroupList(socket);
            
             Server.broadcast("[SYSTEM] " + username + " joined", socket);
           
@@ -109,6 +122,21 @@ public class ClientHandler extends Thread {
                     }
                     continue;
                 }
+
+                if (message.equalsIgnoreCase("/mygroups")) {
+                    Integer myId = DatabaseManager.getUserIdByUsername(username);
+                    List<String> groups = myId != null ? DatabaseManager.getGroupsForUser(myId) : new ArrayList<>();
+                    pw.println("[System] Current groups for " + username + ":");
+                    if (groups.isEmpty()) {
+                        pw.println("[System] (none)");
+                    } else {
+                        for (String groupName : groups) {
+                            pw.println("[System] - " + groupName);
+                        }
+                    }
+                    continue;
+                }
+
                 // Private chat command used by the client private tab.
                 if (message.startsWith("/msg")) {
                     handlePrivateMessage(message);
@@ -136,15 +164,19 @@ public class ClientHandler extends Thread {
                     }
                     Server.userGroup.put(socket, group);
 
-                    pw.println("[System] Joined group: " + group);
-                    Server.broadcastGroupList(socket);
-
-                    // Persist group in DB
+                    // Persist group in DB first so broadcast reads up-to-date data
                     try {
-                        DatabaseManager.getOrCreateGroupId(group);
+                        Integer groupId = DatabaseManager.getOrCreateGroupId(group);
+                        Integer myId = DatabaseManager.getUserIdByUsername(username);
+                        if (groupId != null && myId != null) {
+                            DatabaseManager.addGroupMember(groupId, myId);
+                        }
                     } catch (Exception ex) {
                         ex.printStackTrace();
                     }
+
+                    pw.println("[System] Joined group: " + group);
+                    Server.broadcastGroupList(socket);
 
                     continue;
                 }
@@ -173,6 +205,18 @@ public class ClientHandler extends Thread {
                     // Join vào group mới
                     Server.userGroup.put(socket, groupName);  
                     Server.groupMember.get(groupName).add(socket);
+
+                    // Persist membership first, then broadcast updated list
+                    try {
+                        Integer groupId = DatabaseManager.getGroupIdByName(groupName);
+                        Integer myId = DatabaseManager.getUserIdByUsername(username);
+                        if (groupId != null && myId != null) {
+                            DatabaseManager.addGroupMember(groupId, myId);
+                        }
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
+
                     pw.println("[System] Joined group: " + groupName);
                     Server.broadcastGroupList(socket);
                     continue;
@@ -201,8 +245,18 @@ public class ClientHandler extends Thread {
                     Server.groupMember.get(group).remove(socket);
                     Server.userGroup.remove(socket);
 
-                    pw.println("Left group: " + group);
+                    // Remove membership in DB first, then broadcast update
+                    try {
+                        Integer groupId = DatabaseManager.getGroupIdByName(group);
+                        Integer myId = DatabaseManager.getUserIdByUsername(username);
+                        if (groupId != null && myId != null) {
+                            DatabaseManager.removeGroupMember(groupId, myId);
+                        }
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
 
+                    pw.println("Left group: " + group);
                     Server.broadcastGroupList(socket);
                     continue;
                 }
@@ -221,22 +275,22 @@ public class ClientHandler extends Thread {
                         continue;
                     }
 
-                    // CHECK: Verify user ở trong group
-                    String currentGroup = Server.userGroup.get(socket);
-                    if (currentGroup == null || !currentGroup.equals(groupName)) {
+                    // CHECK: Verify socket is a member of the group
+                    List<Socket> members = Server.groupMember.get(groupName);
+                    if (members == null || !members.contains(socket)) {
                         pw.println("[System] You are not in this group");
                         continue;
                     }
 
                     String msg = message.substring(fistSpace + 1);
-                    Server.broadcastToGroup(groupName, username + ": " + msg);
+                    Server.broadcastToGroup(groupName, username + ": " + msg, socket);
 
                     // Save group message to DB
                     try {
-                        Integer groupId = DatabaseManager.getOrCreateGroupId(groupName);
-                        Integer userId = DatabaseManager.getUserIdByUsername(username);
-                        if (groupId != null && userId != null) {
-                            DatabaseManager.saveGroupMessage(groupId, userId, msg);
+                        Integer groupId = DatabaseManager.getGroupIdByName(groupName);
+                        Integer user_Id = DatabaseManager.getUserIdByUsername(username);
+                        if (groupId != null && user_Id != null && DatabaseManager.isUserInGroup(user_Id, groupId)) {
+                            DatabaseManager.saveGroupMessage(groupId, user_Id, msg);
                         }
                     } catch (Exception ex) {
                         ex.printStackTrace();

@@ -1,5 +1,6 @@
 package server;
 
+import db.DatabaseManager;
 import java.io.*;
 import java.net.*;
 import java.util.*;
@@ -64,14 +65,12 @@ public class Server {
         }
     }
 
-    public static void removeClient(Socket socket) {
-        clients.remove(socket);
-    }
-
     public static void broadcastGroupList(Socket socket) {
-        // Lấy unique groups từ groupMember keys
-        String groupList = "GROUP:" + String.join(",", groupMember.keySet());
-        try { 
+        try {
+            String username = userMap.get(socket);
+            Integer userId = username != null ? DatabaseManager.getUserIdByUsername(username) : null;
+            List<String> groups = userId != null ? DatabaseManager.getGroupsForUser(userId) : new ArrayList<>();
+            String groupList = "GROUP:" + String.join(",", groups);
             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
             out.println(groupList);
         } catch (Exception e) {
@@ -79,11 +78,17 @@ public class Server {
         }
     }
 
-    public static void broadcastToGroup(String groupName, String message) {
+    public static void removeClient(Socket socket) {
+        clients.remove(socket);
+    }
+
+    public static void broadcastToGroup(String groupName, String message, Socket sender) {
         List<Socket> member = groupMember.get(groupName);
-        
+        if (member == null) return;
         for (Socket s: member) {
             try {
+                // Skip null sockets and the sender so sender doesn't get an echo
+                if (s == null || s.equals(sender)) continue;
                 PrintWriter out = new PrintWriter(s.getOutputStream(), true);
                 out.println("[" + groupName + "]: " + message);
             }

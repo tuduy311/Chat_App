@@ -18,6 +18,7 @@ public class chatClientUI extends JFrame {
 
     JTextField commandField;
     JButton commandSendBtn;
+    JButton clearWelcomeBtn;
 
     String pendingHistoryTabKey;
 
@@ -78,11 +79,16 @@ public class chatClientUI extends JFrame {
         // Global command bar: send raw slash commands here
         JPanel commandBar = new JPanel(new BorderLayout());
         commandField = new JTextField();
-        commandField.setToolTipText("Commands: /createGroup, /join, /leave, /history, /delete, /msg ...");
+        commandField.setToolTipText("Commands: /createGroup, /join, /leave, /history, /mygroups, /delete, /msg ...");
         commandSendBtn = new JButton("Run Command");
         commandBar.add(new JLabel("Command: "), BorderLayout.WEST);
         commandBar.add(commandField, BorderLayout.CENTER);
         commandBar.add(commandSendBtn, BorderLayout.EAST);
+
+        JPanel topRightBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        clearWelcomeBtn = new JButton("Clear Welcome");
+        clearWelcomeBtn.addActionListener(e -> welcomeArea.setText(""));
+        topRightBar.add(clearWelcomeBtn);
 
         chatTabs = new JTabbedPane();
         sessions = new HashMap<>();
@@ -90,7 +96,10 @@ public class chatClientUI extends JFrame {
         // Welcome tab = system notifications / command feedback
         welcomeArea = new JTextArea("Welcome. System notifications will appear here.\n");
         welcomeArea.setEditable(false);
-        chatTabs.addTab("Welcome", new JScrollPane(welcomeArea));
+        JPanel welcomePanel = new JPanel(new BorderLayout());
+        welcomePanel.add(new JScrollPane(welcomeArea), BorderLayout.CENTER);
+        welcomePanel.add(topRightBar, BorderLayout.SOUTH);
+        chatTabs.addTab("Welcome", welcomePanel);
 
         rightPanel.add(commandBar, BorderLayout.NORTH);
         rightPanel.add(chatTabs, BorderLayout.CENTER);
@@ -299,6 +308,21 @@ public class chatClientUI extends JFrame {
                     pendingHistoryTabKey = keyForGroup(target);
                 }
             }
+        } else if (text.startsWith("/msg ")) {
+            // If user typed /msg in the global command bar, open the private tab
+            // and append the local "Me: ..." line so the chat shows immediately.
+            String[] parts = text.split(" ", 3);
+            if (parts.length >= 3) {
+                String target = parts[1].trim();
+                String body = parts[2].trim();
+                openPrivateTab(target);
+                String k = keyForPrivate(target);
+                if (sessions.containsKey(k)) {
+                    sessions.get(k).appendLine("Me: " + body);
+                }
+            }
+        } else if (text.equalsIgnoreCase("/mygroups")) {
+            pendingHistoryTabKey = null;
         }
     }
 

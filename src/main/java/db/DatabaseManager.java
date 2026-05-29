@@ -205,6 +205,103 @@ public class DatabaseManager {
         return null;
     }
 
+    // Get group id by name without creating a new row
+    public static Integer getGroupIdByName(String groupName) {
+        String query = "SELECT id FROM `groups` WHERE group_name = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setString(1, groupName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("id");
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    // Add membership record for a user in a group
+    public static boolean addGroupMember(int groupId, int userId) {
+        String query = "INSERT INTO group_members (group_id, user_id) VALUES (?, ?)";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, groupId);
+            ps.setInt(2, userId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            if (e.getMessage() != null && !e.getMessage().toLowerCase().contains("duplicate")) {
+                e.printStackTrace();
+            }
+        }
+        return false;
+    }
+
+    // Remove membership record for a user in a group
+    public static boolean removeGroupMember(int groupId, int userId) {
+        String query = "DELETE FROM group_members WHERE group_id = ? AND user_id = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, groupId);
+            ps.setInt(2, userId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    // Check whether a user belongs to a group
+    public static boolean isUserInGroup(int userId, int groupId) {
+        String query = "SELECT id FROM group_members WHERE group_id = ? AND user_id = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, groupId);
+            ps.setInt(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    // Get all current group names for a user
+    public static List<String> getGroupsForUser(int userId) {
+        List<String> groups = new ArrayList<>();
+        String query = "SELECT g.group_name FROM `groups` g INNER JOIN group_members gm ON g.id = gm.group_id WHERE gm.user_id = ? ORDER BY g.group_name";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    groups.add(rs.getString("group_name"));
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return groups;
+    }
+
+    // Get all group names stored in the database
+    public static List<String> getAllGroupNames() {
+        List<String> groups = new ArrayList<>();
+        String query = "SELECT group_name FROM `groups` ORDER BY group_name";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                groups.add(rs.getString("group_name"));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return groups;
+    }
+
     // Save private message
     public static boolean savePrivateMessage(int senderId, int receiverId, String message) {
         String query = "INSERT INTO messages (sender_id, receiver_id, message) VALUES (?, ?, ?)";
