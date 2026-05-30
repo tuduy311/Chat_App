@@ -55,9 +55,10 @@ chat_app/
 - [x] Swing GUI (online users, groups, chat area)
 - [x] Multi-tab chat UI cho private/group chat
 - [x] Nút đóng tab riêng cho từng cuộc chat
-- [x] Command bar cho lệnh hệ thống (/createGroup, /join, /leave, /history, /delete)
+- [x] Command bar cho lệnh hệ thống (/createGroup grName, /join grName, /leave grName, /history private userName, /history group grName, /delete private msgID, /delete group msgID, /grName msg, /msg userName msg)
 - [x] Welcome tab nhận thông báo chung, online list, group list và phản hồi lệnh
 - [x] /history private, /history group đổ vào đúng tab tương ứng
+- [x] Message delete (soft-delete) + client UI: message ids, `/delete` and right-click delete
 
 ### Database - ✅ Hoàn Thành
 - [x] MySQL schema
@@ -68,7 +69,6 @@ chat_app/
 
 ### Todo - ⏳
 - [ ] File transfer
-- [ ] Xoá message từ UI
 - [ ] Emoji / multiline input / Enter toggle
 - [ ] Server GUI
 - [ ] Client server list config
@@ -117,7 +117,6 @@ cd ....\chat_app
 # Cài dependencies & build
 mvn clean install
 ```
-
 
 ### Database Connection Test
 
@@ -175,15 +174,61 @@ Trong client GUI:
 - Có thể đóng từng tab chat bằng nút `x` ở tiêu đề tab.
 - `/history private <username>` và `/history group <groupname>` sẽ hiển thị trong tab tương ứng.
 
+how delete works
+- Messages saved to DB now return a message id (shown as `[#123]` appended to messages).
+- You can delete a message with `/delete <id>` (soft-delete updates DB and broadcasts deletion).
+- Client UI: right-click any transcript line to `Copy ID` or `Delete Message` (sends `/delete <id>`).
+
+Notes & troubleshooting
+- If a message line has no `[#id]`, right-click will show the menu but Delete will report "No message id found".
+- If delete doesn't appear to work, ensure server console shows no SQL errors and that `mvn compile` was run after code changes.
+
 Test commands trong client:
-```
-/msg username message      # Private message
-/createGroup groupname     # Tạo group
-/join groupname           # Join group
-/leave groupname          # Leave group
-/groupname message         # Gửi message vào group
- /history private username # Load recent private history with username
- /history group groupname  # Load recent group history
+Lệnh (cú pháp, ví dụ, hành vi)
+
+```text
+/msg <username> <message>
+    - Gửi tin nhắn riêng tới một người dùng.
+    - Ví dụ: `/msg alice Chào Alice!` → lưu vào DB và server trả về echo kèm id `[#123]`.
+
+/createGroup <groupname>
+    - Tạo nhóm mới và tự động tham gia; thông tin thành viên được lưu vào DB.
+    - Ví dụ: `/createGroup devteam`
+
+/join <groupname>
+    - Tham gia vào nhóm đã có. Sau khi join, bạn mới có thể gửi tin cho nhóm đó.
+    - Ví dụ: `/join devteam`
+
+/leave <groupname>
+    - Rời khỏi nhóm (xóa membership trong DB).
+    - Ví dụ: `/leave devteam`
+
+/<groupname> <message>
+    - Gửi tin nhắn tới nhóm đã tham gia (viết tắt cho gửi nhóm).
+    - Ví dụ: `/devteam Họp lúc 10h` → mọi thành viên nhận được `[devteam]: user: message [#id]`.
+
+/history private <username>
+    - Hiển thị lịch sử tin nhắn riêng giữa bạn và `<username>`. Các tin có id sẽ hiển thị `[#id]`.
+    - Ví dụ: `/history private alice`
+
+/history group <groupname>
+    - Hiển thị lịch sử nhóm `<groupname>`; yêu cầu bạn là thành viên của nhóm. Lịch sử có kèm id.
+    - Ví dụ: `/history group devteam`
+
+/mygroups
+    - Liệt kê các nhóm bạn đang tham gia (lấy từ DB).
+
+/delete <id>
+    - Xóa tin nhắn theo id. Hành vi:
+        - Nếu bạn là người gửi ban đầu của tin nhắn, `/delete <id>` sẽ thực hiện soft-delete trên DB và server sẽ broadcast sự kiện xóa tới tất cả client.
+        - Nếu bạn KHÔNG phải là người gửi, thao tác xóa chỉ áp dụng cục bộ trên client của bạn (không thay đổi DB hoặc ảnh hưởng tới người khác).
+    - Ví dụ: `/delete 123`
+
+UI: chuột phải vào dòng trong transcript → `Copy ID` hoặc `Delete Message`. `Copy ID` sẽ copy id số vào clipboard; `Delete Message` tương đương với `/delete <id>` (theo quyền như trên).
+
+Ghi chú:
+- Tin nhắn nhóm hiển thị dạng `[tênnhóm]: username: message [#id]`. Phần `[#id]` cần để server có thể xóa server-side.
+- Nếu mục lịch sử không có `[#id]` thì không thể xóa trên server (chỉ ẩn cục bộ).
 ```
 
 ## Phát Triển Tiếp Theo

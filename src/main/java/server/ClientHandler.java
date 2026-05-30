@@ -33,15 +33,22 @@ public class ClientHandler extends Thread {
                 return;
             }
 
-            PrintWriter targetOut = new PrintWriter(targetSocket.getOutputStream(), true);
-            targetOut.println("[Private] from " + username + ": " + msg);
-            // Save to database if possible
+            // Save to database and return generated id
             try {
                 Integer senderId = DatabaseManager.getUserIdByUsername(username);
                 Integer receiverId = DatabaseManager.getUserIdByUsername(user);
+                Integer msgId = null;
                 if (senderId != null && receiverId != null) {
-                    DatabaseManager.savePrivateMessage(senderId, receiverId, msg);
+                    msgId = DatabaseManager.savePrivateMessageReturnId(senderId, receiverId, msg);
                 }
+
+                String outMsg = "[Private] from " + username + ": " + msg + (msgId != null ? " [#" + msgId + "]" : "");
+                PrintWriter targetOut = new PrintWriter(targetSocket.getOutputStream(), true);
+                targetOut.println(outMsg);
+
+                // Also send confirmation to sender so they see the message with id
+                String selfMsg = "[Private] to " + user + ": " + msg + (msgId != null ? " [#" + msgId + "]" : "");
+                pw.println(selfMsg);
             } catch (Exception ex) {
                 ex.printStackTrace();
             }
@@ -73,7 +80,6 @@ public class ClientHandler extends Thread {
                     if (!Server.groupMember.get(groupName).contains(socket)) {
                         Server.groupMember.get(groupName).add(socket);
                     }
-                    Server.userGroup.putIfAbsent(socket, groupName);
                 }
             }
 
@@ -150,19 +156,11 @@ public class ClientHandler extends Thread {
                         pw.println("Group created: " + group);
                     }
                     else pw.println("Group already exists: " + group);
-                    
-                    //  Remove khỏi group cũ
-                    String currentGroup = Server.userGroup.get(socket);
-                    if (currentGroup != null) {
-                        Server.groupMember.get(currentGroup).remove(socket);
-                        pw.println("[System] Left group: " + currentGroup);
-                    }
 
-                    // Chỉ add nếu socket chưa ở group này
+                    // Add current user to the new group without leaving other joined groups.
                     if (!Server.groupMember.get(group).contains(socket)) {
                         Server.groupMember.get(group).add(socket);
                     }
-                    Server.userGroup.put(socket, group);
 
                     // Persist group in DB first so broadcast reads up-to-date data
                     try {
@@ -194,17 +192,11 @@ public class ClientHandler extends Thread {
                         pw.println("Group does not exist: " + groupName);
                         continue;
                     }
-                    
-                    // Remove khỏi group cũ nếu có
-                    String currentGroup = Server.userGroup.get(socket);
-                    if (currentGroup != null) {
-                        Server.groupMember.get(currentGroup).remove(socket);  
-                        pw.println("[System] Left group: " + currentGroup);
-                    }
 
-                    // Join vào group mới
-                    Server.userGroup.put(socket, groupName);  
-                    Server.groupMember.get(groupName).add(socket);
+                    // Join the new group without leaving other groups.
+                    if (!Server.groupMember.get(groupName).contains(socket)) {
+                        Server.groupMember.get(groupName).add(socket);
+                    }
 
                     // Persist membership first, then broadcast updated list
                     try {
@@ -236,14 +228,12 @@ public class ClientHandler extends Thread {
                         continue;
                     }
 
-                    if (!Server.userGroup.containsKey(socket) ||
-                        !Server.userGroup.get(socket).equals(group)) {
+                    if (!Server.groupMember.get(group).contains(socket)) {
                         pw.println("You are not in this group");
                         continue;
                     }
 
                     Server.groupMember.get(group).remove(socket);
-                    Server.userGroup.remove(socket);
 
                     // Remove membership in DB first, then broadcast update
                     try {
@@ -258,6 +248,67 @@ public class ClientHandler extends Thread {
 
                     pw.println("Left group: " + group);
                     Server.broadcastGroupList(socket);
+                    continue;
+                }
+
+                // Delete message command must be handled before the generic /<group> route.
+                if (message.startsWith("/delete ")) {
+                    String[] parts = message.split(" ", 3);
+                    if (parts.length < 3) {
+                        pw.println("Usage: /delete private <messageId> OR /delete group <messageId>");
+                        continue;
+                    }
+
+                    String scope = parts[1].trim();
+                    String idText = parts[2].trim();
+                    try {
+                        int id = Integer.parseInt(idText);
+                        Integer myId = DatabaseManager.getUserIdByUsername(username);
+                        boolean deleteForEveryone = false;
+                        boolean ok = false;
+
+                        if (scope.equalsIgnoreCase("private")) {
+                            Integer senderId = DatabaseManager.getPrivateMessageSenderId(id);
+                            if (senderId == null) {
+                                pw.println("[System] Private message id not found: " + id);
+                                continue;
+                            }
+                            deleteForEveryone = myId != null && senderId.equals(myId);
+                            if (deleteForEveryone) {
+                                ok = DatabaseManager.softDeletePrivateMessageById(id);
+                            }
+                        } else if (scope.equalsIgnoreCase("group")) {
+                            Integer senderId = DatabaseManager.getGroupMessageSenderId(id);
+                            if (senderId == null) {
+                                pw.println("[System] Group message id not found: " + id);
+                                continue;
+                            }
+                            deleteForEveryone = myId != null && senderId.equals(myId);
+                            if (deleteForEveryone) {
+                                ok = DatabaseManager.softDeleteGroupMessageById(id);
+                            }
+                        } else {
+                            pw.println("[System] Usage: /delete private <messageId> OR /delete group <messageId>");
+                            continue;
+                        }
+
+                        if (deleteForEveryone && ok) {
+                            for (Socket s : Server.clients) {
+                                try {
+                                    PrintWriter out = new PrintWriter(s.getOutputStream(), true);
+                                    out.println("[Deleted] " + scope.toLowerCase() + " " + id);
+                                } catch (Exception e) { }
+                            }
+                            pw.println("[System] Message " + id + " deleted for everyone");
+                        } else if (!deleteForEveryone) {
+                            pw.println("[DeletedLocal] " + scope.toLowerCase() + " " + id);
+                            pw.println("[System] Message " + id + " removed only for you");
+                        } else {
+                            pw.println("[System] Message id not found: " + id);
+                        }
+                    } catch (NumberFormatException ex) {
+                        pw.println("[System] Invalid message id");
+                    }
                     continue;
                 }
 
@@ -283,15 +334,16 @@ public class ClientHandler extends Thread {
                     }
 
                     String msg = message.substring(fistSpace + 1);
-                    Server.broadcastToGroup(groupName, username + ": " + msg, socket);
-
-                    // Save group message to DB
+                    // Save group message to DB and broadcast with the generated id
                     try {
                         Integer groupId = DatabaseManager.getGroupIdByName(groupName);
                         Integer user_Id = DatabaseManager.getUserIdByUsername(username);
+                        Integer msgId = null;
                         if (groupId != null && user_Id != null && DatabaseManager.isUserInGroup(user_Id, groupId)) {
-                            DatabaseManager.saveGroupMessage(groupId, user_Id, msg);
+                            msgId = DatabaseManager.saveGroupMessageReturnId(groupId, user_Id, msg);
                         }
+                        String payload = username + ": " + msg + (msgId != null ? " [#" + msgId + "]" : "");
+                        Server.broadcastToGroup(groupName, payload);
                     } catch (Exception ex) {
                         ex.printStackTrace();
                     }

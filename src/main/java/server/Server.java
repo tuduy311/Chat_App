@@ -82,13 +82,12 @@ public class Server {
         clients.remove(socket);
     }
 
-    public static void broadcastToGroup(String groupName, String message, Socket sender) {
+    public static void broadcastToGroup(String groupName, String message) {
         List<Socket> member = groupMember.get(groupName);
         if (member == null) return;
         for (Socket s: member) {
             try {
-                // Skip null sockets and the sender so sender doesn't get an echo
-                if (s == null || s.equals(sender)) continue;
+                if (s == null) continue;
                 PrintWriter out = new PrintWriter(s.getOutputStream(), true);
                 out.println("[" + groupName + "]: " + message);
             }

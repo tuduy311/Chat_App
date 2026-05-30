@@ -304,27 +304,60 @@ public class DatabaseManager {
 
     // Save private message
     public static boolean savePrivateMessage(int senderId, int receiverId, String message) {
+        return savePrivateMessageReturnId(senderId, receiverId, message) != null;
+    }
+
+    // Save private message and return generated id
+    public static Integer savePrivateMessageReturnId(int senderId, int receiverId, String message) {
         String query = "INSERT INTO messages (sender_id, receiver_id, message) VALUES (?, ?, ?)";
         try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(query)) {
+             PreparedStatement ps = conn.prepareStatement(query, PreparedStatement.RETURN_GENERATED_KEYS)) {
             ps.setInt(1, senderId);
             ps.setInt(2, receiverId);
             ps.setString(3, message);
-            return ps.executeUpdate() > 0;
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                try (ResultSet keys = ps.getGeneratedKeys()) {
+                    if (keys.next()) return keys.getInt(1);
+                }
+            }
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        return false;
+        return null;
     }
 
     // Save group message
     public static boolean saveGroupMessage(int groupId, int userId, String message) {
+        return saveGroupMessageReturnId(groupId, userId, message) != null;
+    }
+
+    // Save group message and return generated id
+    public static Integer saveGroupMessageReturnId(int groupId, int userId, String message) {
         String query = "INSERT INTO group_messages (group_id, user_id, message) VALUES (?, ?, ?)";
         try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(query)) {
+             PreparedStatement ps = conn.prepareStatement(query, PreparedStatement.RETURN_GENERATED_KEYS)) {
             ps.setInt(1, groupId);
             ps.setInt(2, userId);
             ps.setString(3, message);
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                try (ResultSet keys = ps.getGeneratedKeys()) {
+                    if (keys.next()) return keys.getInt(1);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    // Soft-delete a message by id: try messages first, then group_messages
+    public static boolean softDeletePrivateMessageById(int messageId) {
+        String query = "UPDATE messages SET message = '[deleted]' WHERE id = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, messageId);
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
             e.printStackTrace();
@@ -332,9 +365,56 @@ public class DatabaseManager {
         return false;
     }
 
+    // Soft-delete a group message by id
+    public static boolean softDeleteGroupMessageById(int messageId) {
+        String query = "UPDATE group_messages SET message = '[deleted]' WHERE id = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, messageId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    // Get sender id for a private message
+    public static Integer getPrivateMessageSenderId(int messageId) {
+        String query = "SELECT sender_id FROM messages WHERE id = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, messageId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("sender_id");
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    // Get sender id for a group message
+    public static Integer getGroupMessageSenderId(int messageId) {
+        String query = "SELECT user_id FROM group_messages WHERE id = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, messageId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("user_id");
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
     // Get private chat history between two users (most recent first)
     public static List<String> getPrivateHistory(int userAId, int userBId, int limit) {
-        String query = "SELECT sender_id, message, created_at FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at DESC LIMIT ?";
+        String query = "SELECT id, sender_id, message, created_at FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at DESC LIMIT ?";
         List<String> out = new ArrayList<>();
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(query)) {
@@ -345,10 +425,11 @@ public class DatabaseManager {
             ps.setInt(5, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
+                    int messageId = rs.getInt("id");
                     int senderId = rs.getInt("sender_id");
                     String msg = rs.getString("message");
                     String senderName = getUserById(senderId) != null ? getUserById(senderId).getUsername() : "unknown";
-                    out.add(senderName + ": " + msg);
+                    out.add(senderName + ": " + msg + " [#" + messageId + "]");
                 }
             }
         } catch (SQLException e) {
@@ -359,7 +440,7 @@ public class DatabaseManager {
 
     // Get group chat history (most recent first)
     public static List<String> getGroupHistory(int groupId, int limit) {
-        String query = "SELECT user_id, message, created_at FROM group_messages WHERE group_id = ? ORDER BY created_at DESC LIMIT ?";
+        String query = "SELECT id, user_id, message, created_at FROM group_messages WHERE group_id = ? ORDER BY created_at DESC LIMIT ?";
         List<String> out = new ArrayList<>();
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(query)) {
@@ -367,10 +448,11 @@ public class DatabaseManager {
             ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
+                    int messageId = rs.getInt("id");
                     int userId = rs.getInt("user_id");
                     String msg = rs.getString("message");
                     String senderName = getUserById(userId) != null ? getUserById(userId).getUsername() : "unknown";
-                    out.add(senderName + ": " + msg);
+                    out.add(senderName + ": " + msg + " [#" + messageId + "]");
                 }
             }
         } catch (SQLException e) {

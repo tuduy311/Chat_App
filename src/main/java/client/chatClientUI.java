@@ -249,6 +249,63 @@ public class chatClientUI extends JFrame {
             super(new BorderLayout());
             this.target = target; this.isGroup = isGroup;
             transcript = new JTextArea(); transcript.setEditable(false);
+            // Add right-click context menu on transcript lines for Copy ID / Delete
+            transcript.addMouseListener(new MouseAdapter() {
+                private void showMenu(MouseEvent e) {
+                    try {
+                        int offset = transcript.viewToModel2D(e.getPoint());
+                        int line = transcript.getLineOfOffset(offset);
+                        int start = transcript.getLineStartOffset(line);
+                        int end = transcript.getLineEndOffset(line);
+                        String lineText = transcript.getText().substring(start, end).trim();
+                        // find pattern [#123]
+                        String id = null;
+                        int idx = lineText.indexOf("[#");
+                        if (idx >= 0) {
+                            int endIdx = lineText.indexOf(']', idx);
+                            if (endIdx > idx) {
+                                String inner = lineText.substring(idx+2, endIdx);
+                                if (inner.matches("\\d+")) id = inner;
+                            }
+                        }
+                        final String foundId = id;
+
+                        JPopupMenu menu = new JPopupMenu();
+                        JMenuItem copy = new JMenuItem("Copy ID");
+                        copy.addActionListener(ae -> {
+                            if (foundId != null) {
+                                try {
+                                    java.awt.datatransfer.StringSelection ss = new java.awt.datatransfer.StringSelection(foundId);
+                                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(ss, null);
+                                    appendWelcome("[System] Copied id: " + foundId);
+                                } catch (Exception ex) { }
+                            }
+                        });
+                        menu.add(copy);
+
+                        JMenuItem del = new JMenuItem("Delete Message");
+                        del.addActionListener(ae -> {
+                            if (foundId != null) {
+                                String scope = isGroup ? "group" : "private";
+                                // send scope-aware delete command so the server can decide global vs local delete
+                                sendRawCommand("/delete " + scope + " " + foundId);
+                            } else {
+                                appendWelcome("[System] No message id found on this line");
+                            }
+                        });
+                        menu.add(del);
+
+                        menu.show(transcript, e.getX(), e.getY());
+                    } catch (Exception ex) {
+                        // ignore
+                    }
+                }
+
+                @Override
+                public void mousePressed(MouseEvent e) { if (e.isPopupTrigger()) showMenu(e); }
+                @Override
+                public void mouseReleased(MouseEvent e) { if (e.isPopupTrigger()) showMenu(e); }
+            });
             input = new JTextField();
             send = new JButton("Send");
 
@@ -269,6 +326,28 @@ public class chatClientUI extends JFrame {
             transcript.setCaretPosition(transcript.getDocument().getLength());
         }
 
+        void markDeleted(int messageId) {
+            String marker = "[#" + messageId + "]";
+            String[] lines = transcript.getText().split("\n");
+            StringBuilder sb = new StringBuilder();
+            for (String l : lines) {
+                if (l.contains(marker)) {
+                    // Replace message body with [deleted]
+                    int colon = l.indexOf(":");
+                    if (colon >= 0) {
+                        String prefix = l.substring(0, colon+1);
+                        sb.append(prefix).append(" [deleted]");
+                    } else {
+                        sb.append("[deleted]");
+                    }
+                } else {
+                    sb.append(l);
+                }
+                sb.append("\n");
+            }
+            transcript.setText(sb.toString());
+        }
+
         void sendFromPanel() {
             String text = input.getText().trim();
             if (text.isEmpty() || pw == null) return;
@@ -276,10 +355,8 @@ public class chatClientUI extends JFrame {
                 sendRawCommand(text);
             } else if (isGroup) {
                 pw.println("/" + target + " " + text);
-                appendLine("Me: " + text);
             } else {
                 pw.println("/msg " + target + " " + text);
-                appendLine("Me: " + text);
             }
             input.setText("");
         }
@@ -309,17 +386,12 @@ public class chatClientUI extends JFrame {
                 }
             }
         } else if (text.startsWith("/msg ")) {
-            // If user typed /msg in the global command bar, open the private tab
-            // and append the local "Me: ..." line so the chat shows immediately.
+            // If user typed /msg in the global command bar, just open the private tab;
+            // the server will echo back a '[Private] to' message which we display as 'Me:'
             String[] parts = text.split(" ", 3);
-            if (parts.length >= 3) {
+            if (parts.length >= 2) {
                 String target = parts[1].trim();
-                String body = parts[2].trim();
                 openPrivateTab(target);
-                String k = keyForPrivate(target);
-                if (sessions.containsKey(k)) {
-                    sessions.get(k).appendLine("Me: " + body);
-                }
             }
         } else if (text.equalsIgnoreCase("/mygroups")) {
             pendingHistoryTabKey = null;
@@ -391,15 +463,37 @@ public class chatClientUI extends JFrame {
                             if (c instanceof ChatSessionPanel) ((ChatSessionPanel)c).appendLine(msg);
                         }
                     }
+                    else if (msg.startsWith("[Private] to ")) {
+                        // format: [Private] to bob: hello [#123]
+                        try {
+                            int idx = msg.indexOf(":");
+                            String head = msg.substring(0, idx);
+                            String toUser = head.substring("[Private] to ".length()).trim();
+                            String content = msg.substring(idx+1).trim();
+                            String key = keyForPrivate(toUser);
+                            if (!sessions.containsKey(key)) openPrivateTab(toUser);
+                            // show as Me: content
+                            sessions.get(key).appendLine("Me: " + content);
+                        } catch (Exception ex) {
+                            appendWelcome(msg);
+                        }
+                    }
                     else if (msg.startsWith("[") && msg.contains("]: ") && !msg.startsWith("[History]")) {
                         // group: [groupName]: username: message
                         try {
                             int endBracket = msg.indexOf("]:");
-                            String group = msg.substring(1, endBracket);
-                            String rest = msg.substring(endBracket+3).trim();
-                            String key = keyForGroup(group);
-                            if (!sessions.containsKey(key)) openGroupTab(group);
-                            sessions.get(key).appendLine(rest);
+                            if (endBracket > 0) {
+                                // group name is between '[' and ']'
+                                String group = msg.substring(1, endBracket);
+                                // skip "]:" and the following space to get "username: message"
+                                String rest = msg.substring(endBracket + 3).trim();
+                                String key = keyForGroup(group);
+                                if (!sessions.containsKey(key)) openGroupTab(group);
+                                sessions.get(key).appendLine(rest);
+                            } else {
+                                Component c = chatTabs.getSelectedComponent();
+                                if (c instanceof ChatSessionPanel) ((ChatSessionPanel)c).appendLine(msg);
+                            }
                         } catch (Exception ex) {
                             Component c = chatTabs.getSelectedComponent();
                             if (c instanceof ChatSessionPanel) ((ChatSessionPanel)c).appendLine(msg);
@@ -409,6 +503,33 @@ public class chatClientUI extends JFrame {
                         if (pendingHistoryTabKey != null && sessions.containsKey(pendingHistoryTabKey)) {
                             sessions.get(pendingHistoryTabKey).appendLine(msg);
                         } else {
+                            appendWelcome(msg);
+                        }
+                    }
+                    else if (msg.startsWith("[Deleted] ") || msg.startsWith("[DeletedLocal] ")) {
+                        try {
+                            String prefix = msg.startsWith("[DeletedLocal] ") ? "[DeletedLocal] " : "[Deleted] ";
+                            String payload = msg.substring(prefix.length()).trim();
+                            String[] parts = payload.split(" ", 2);
+                            if (parts.length < 2) {
+                                appendWelcome(msg);
+                                continue;
+                            }
+                            String scope = parts[0].trim();
+                            int id = Integer.parseInt(parts[1].trim());
+                            boolean groupScope = scope.equalsIgnoreCase("group");
+                            // Mark deleted only in sessions matching the scope
+                            for (ChatSessionPanel p : sessions.values()) {
+                                if (p.isGroup == groupScope) {
+                                    p.markDeleted(id);
+                                }
+                            }
+                            if (msg.startsWith("[DeletedLocal] ")) {
+                                appendWelcome("[System] Message " + id + " removed only for you");
+                            } else {
+                                appendWelcome("[System] Message " + id + " deleted for everyone");
+                            }
+                        } catch (Exception ex) {
                             appendWelcome(msg);
                         }
                     }
