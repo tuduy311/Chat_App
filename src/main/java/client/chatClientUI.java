@@ -160,6 +160,10 @@ public class chatClientUI extends JFrame {
     private String keyForGroup(String group) { return "g:" + group; }
 
     private void openPrivateTab(String user) {
+        openPrivateTab(user, true);
+    }
+
+    private void openPrivateTab(String user, boolean autoLoadHistory) {
         String key = keyForPrivate(user);
         if (sessions.containsKey(key)) {
             chatTabs.setSelectedComponent(sessions.get(key));
@@ -169,9 +173,16 @@ public class chatClientUI extends JFrame {
         sessions.put(key, p);
         addClosableTab(user, p);
         chatTabs.setSelectedComponent(p);
+        if (autoLoadHistory) {
+            requestHistory("private", user);
+        }
     }
 
     private void openGroupTab(String group) {
+        openGroupTab(group, true);
+    }
+
+    private void openGroupTab(String group, boolean autoLoadHistory) {
         String key = keyForGroup(group);
         if (sessions.containsKey(key)) {
             chatTabs.setSelectedComponent(sessions.get(key));
@@ -181,6 +192,15 @@ public class chatClientUI extends JFrame {
         sessions.put(key, p);
         addClosableTab(group, p);
         chatTabs.setSelectedComponent(p);
+        if (autoLoadHistory) {
+            requestHistory("group", group);
+        }
+    }
+
+    private void requestHistory(String type, String target) {
+        if (pw == null) return;
+        pendingHistoryTabKey = "private".equalsIgnoreCase(type) ? keyForPrivate(target) : keyForGroup(target);
+        pw.println("/history " + type + " " + target);
     }
 
     private void addClosableTab(String title, Component content) {
@@ -378,10 +398,10 @@ public class chatClientUI extends JFrame {
                 String type = parts[1].trim();
                 String target = parts[2].trim();
                 if (type.equalsIgnoreCase("private")) {
-                    openPrivateTab(target);
+                    openPrivateTab(target, false);
                     pendingHistoryTabKey = keyForPrivate(target);
                 } else if (type.equalsIgnoreCase("group")) {
-                    openGroupTab(target);
+                    openGroupTab(target, false);
                     pendingHistoryTabKey = keyForGroup(target);
                 }
             }
@@ -500,10 +520,11 @@ public class chatClientUI extends JFrame {
                         }
                     }
                     else if (msg.startsWith("[History]")) {
+                        String historyText = msg.substring("[History]".length()).trim();
                         if (pendingHistoryTabKey != null && sessions.containsKey(pendingHistoryTabKey)) {
-                            sessions.get(pendingHistoryTabKey).appendLine(msg);
+                            sessions.get(pendingHistoryTabKey).appendLine(historyText);
                         } else {
-                            appendWelcome(msg);
+                            appendWelcome(historyText);
                         }
                     }
                     else if (msg.startsWith("[Deleted] ") || msg.startsWith("[DeletedLocal] ")) {
