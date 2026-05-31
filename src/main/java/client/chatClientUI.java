@@ -467,6 +467,19 @@ public class chatClientUI extends JFrame {
                         appendWelcome("[System] Group list updated: " + groups);
                         //continue;
                     }
+                    else if (msg.startsWith("RECENT:")) {
+                        String payload = msg.substring("RECENT:".length()).trim();
+                        if (!payload.isEmpty()) {
+                            String[] users = payload.split(",");
+                            for (String u : users) {
+                                String user = u.trim();
+                                if (!user.isEmpty()) {
+                                    // open private tab and auto-load history
+                                    openPrivateTab(user, true);
+                                }
+                            }
+                        }
+                    }
                     else if (msg.startsWith("[Private] from ")) {
                         // format: [Private] from alice: hello
                         try {

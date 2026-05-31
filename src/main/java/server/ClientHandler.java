@@ -85,6 +85,18 @@ public class ClientHandler extends Thread {
 
             Server.broadcastOnline();
             Server.broadcastGroupList(socket);
+            // Send recent private contacts so client can restore tabs
+            try {
+                if (userId != null) {
+                    List<String> recent = DatabaseManager.getRecentPrivateContacts(userId, 10);
+                    if (recent != null && !recent.isEmpty()) {
+                        String r = String.join(",", recent);
+                        pw.println("RECENT:" + r);
+                    }
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
            
             Server.broadcast("[SYSTEM] " + username + " joined", socket);
           

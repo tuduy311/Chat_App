@@ -302,6 +302,34 @@ public class DatabaseManager {
         return groups;
     }
 
+    // Get recent private conversation partners for a user (ordered by last message)
+    public static List<String> getRecentPrivateContacts(int userId, int limit) {
+        List<String> out = new ArrayList<>();
+        String query = "SELECT u.username FROM ("
+                + "  SELECT CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_id, MAX(created_at) AS last_at"
+                + "  FROM messages"
+                + "  WHERE sender_id = ? OR receiver_id = ?"
+                + "  GROUP BY other_id"
+                + "  ORDER BY last_at DESC"
+                + "  LIMIT ?"
+                + ") t JOIN users u ON u.id = t.other_id";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            ps.setInt(1, userId);
+            ps.setInt(2, userId);
+            ps.setInt(3, userId);
+            ps.setInt(4, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(rs.getString("username"));
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return out;
+    }
+
     // Save private message
     public static boolean savePrivateMessage(int senderId, int receiverId, String message) {
         return savePrivateMessageReturnId(senderId, receiverId, message) != null;
