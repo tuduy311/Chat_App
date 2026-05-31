@@ -57,8 +57,16 @@ chat_app/
 - [x] Nút đóng tab riêng cho từng cuộc chat
 - [x] Command bar cho lệnh hệ thống (/createGroup grName, /join grName, /leave grName, /history private userName, /history group grName, /delete private msgID, /delete group msgID, /grName msg, /msg userName msg)
 - [x] Welcome tab nhận thông báo chung, online list, group list và phản hồi lệnh
-- [x] /history private, /history group đổ vào đúng tab tương ứng
+- [x] Tự động mở lại tab private gần đây và load lịch sử khi đăng nhập lại
+- [x] `/history private`, `/history group` đổ vào đúng tab tương ứng
 - [x] Message delete (soft-delete) + client UI: message ids, `/delete` and right-click delete
+- [x] Cho phép Enter gửi hoặc xuống dòng trong ô chat
+- [x] Cho phép chèn emoji đơn giản trong ô chat
+- [x] File gửi được lưu metadata vào DB và hiển thị lại trong lịch sử chat
+
+Ghi chú ngắn:
+- **Tự động phục hồi**: khi đăng nhập lại client sẽ tự mở các tab private gần đây và tự yêu cầu lịch sử tương ứng.
+- **Xóa tin nhắn**: nếu bạn là người gửi ban đầu, xóa sẽ soft-delete ở DB và broadcast cho mọi client; nếu không phải người gửi, xóa chỉ ẩn cục bộ trên client của bạn.
 
 ### Database - ✅ Hoàn Thành
 - [x] MySQL schema
@@ -68,8 +76,7 @@ chat_app/
 - [x] Lưu lịch sử chat private/group
 
 ### Todo - ⏳
-- [ ] File transfer
-- [ ] Emoji / multiline input / Enter toggle
+- [~] File transfer (đang triển khai — thiết kế tạm: Base64 chunk qua giao thức text)
 - [ ] Server GUI
 - [ ] Client server list config
 
@@ -169,19 +176,14 @@ mvn exec:java "-Dexec.mainClass=client.chatClientUI"
 Trong client GUI:
 - Gõ lệnh hệ thống như `/createGroup`, `/join`, `/leave`, `/history`, `/delete` ở ô `Command` phía trên danh sách tab.
 - Gõ tin nhắn riêng hoặc tin nhắn nhóm trong ô nhập ở từng tab chat.
+- Ô chat hỗ trợ nhiều dòng; bật/tắt `Enter sends` để chọn Enter là gửi hoặc xuống dòng.
+- Có thanh emoji đơn giản để chèn nhanh 10 emoji cơ bản, gồm tim, vui, buồn và các biểu tượng phổ biến khác.
 - `groupArea` chỉ là danh sách group, không phải nơi nhập lệnh.
 - Tab `Welcome` dùng để hiện thông báo chung, trạng thái online/group, và phản hồi hệ thống.
 - Có thể đóng từng tab chat bằng nút `x` ở tiêu đề tab.
 - `/history private <username>` và `/history group <groupname>` sẽ hiển thị trong tab tương ứng.
-
-how delete works
-- Messages saved to DB now return a message id (shown as `[#123]` appended to messages).
-- You can delete a message with `/delete <id>` (soft-delete updates DB and broadcasts deletion).
-- Client UI: right-click any transcript line to `Copy ID` or `Delete Message` (sends `/delete <id>`).
-
-Notes & troubleshooting
-- If a message line has no `[#id]`, right-click will show the menu but Delete will report "No message id found".
-- If delete doesn't appear to work, ensure server console shows no SQL errors and that `mvn compile` was run after code changes.
+- Khi đăng nhập lại, client sẽ tự mở lại các cuộc chat gần đây và nạp lịch sử cũ.
+- File đã gửi sẽ được lưu metadata vào bảng `files` và cũng hiện lại trong `/history` như một dòng file riêng.
 
 Test commands trong client:
 Lệnh (cú pháp, ví dụ, hành vi)
@@ -233,9 +235,6 @@ Ghi chú:
 
 ## Phát Triển Tiếp Theo
 
-1. **File Transfer** - Share files trong chat
-2. **Xoá message từ UI** - thao tác xoá message ngay trên client
-3. **Emoji / multiline input / Enter toggle**
-4. **Server GUI** - màn hình quản lý server và client connected
-5. **Client server list config** - lưu danh sách server và chọn server để kết nối
+1. **Server GUI** - màn hình quản lý server và client connected
+2. **Client server list config** - lưu danh sách server và chọn server để kết nối
 

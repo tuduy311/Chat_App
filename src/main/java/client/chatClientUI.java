@@ -5,7 +5,12 @@ import java.net.*;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.nio.file.Files;
+import java.util.Base64;
+import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 
@@ -19,8 +24,11 @@ public class chatClientUI extends JFrame {
     JTextField commandField;
     JButton commandSendBtn;
     JButton clearWelcomeBtn;
+    JCheckBox enterSendCheckbox;
 
-    String pendingHistoryTabKey;
+    Deque<String> pendingHistoryTabKeys;
+    String activeHistoryTabKey;
+    Map<String, IncomingFileTransfer> incomingFiles;
 
     JTextArea welcomeArea;
     JTextArea onlineArea;
@@ -86,12 +94,16 @@ public class chatClientUI extends JFrame {
         commandBar.add(commandSendBtn, BorderLayout.EAST);
 
         JPanel topRightBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        enterSendCheckbox = new JCheckBox("Enter sends", true);
         clearWelcomeBtn = new JButton("Clear Welcome");
         clearWelcomeBtn.addActionListener(e -> welcomeArea.setText(""));
+        topRightBar.add(enterSendCheckbox);
         topRightBar.add(clearWelcomeBtn);
 
         chatTabs = new JTabbedPane();
         sessions = new HashMap<>();
+        pendingHistoryTabKeys = new ArrayDeque<>();
+        incomingFiles = new HashMap<>();
 
         // Welcome tab = system notifications / command feedback
         welcomeArea = new JTextArea("Welcome. System notifications will appear here.\n");
@@ -199,7 +211,7 @@ public class chatClientUI extends JFrame {
 
     private void requestHistory(String type, String target) {
         if (pw == null) return;
-        pendingHistoryTabKey = "private".equalsIgnoreCase(type) ? keyForPrivate(target) : keyForGroup(target);
+        pendingHistoryTabKeys.addLast("private".equalsIgnoreCase(type) ? keyForPrivate(target) : keyForGroup(target));
         pw.println("/history " + type + " " + target);
     }
 
@@ -257,12 +269,173 @@ public class chatClientUI extends JFrame {
         welcomeArea.setCaretPosition(welcomeArea.getDocument().getLength());
     }
 
+    private void showSystemNotice(String text) {
+        appendWelcome(text);
+        Component selected = chatTabs != null ? chatTabs.getSelectedComponent() : null;
+        if (selected instanceof ChatSessionPanel) {
+            ((ChatSessionPanel) selected).appendLine(text);
+        }
+        JOptionPane.showMessageDialog(this, text, "ChatApp", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private static class IncomingFileTransfer {
+        String scope;
+        String target;
+        String sender;
+        String fileName;
+        long fileSize;
+        int totalParts;
+        Map<Integer, String> chunks = new LinkedHashMap<>();
+
+        IncomingFileTransfer(String scope, String target, String sender, String fileName, long fileSize, int totalParts) {
+            this.scope = scope;
+            this.target = target;
+            this.sender = sender;
+            this.fileName = fileName;
+            this.fileSize = fileSize;
+            this.totalParts = totalParts;
+        }
+
+        boolean isComplete() {
+            return chunks.size() >= totalParts && totalParts > 0;
+        }
+
+        byte[] assemble() throws Exception {
+            StringBuilder encoded = new StringBuilder();
+            for (int i = 0; i < totalParts; i++) {
+                String chunk = chunks.get(i);
+                if (chunk == null) {
+                    throw new IllegalStateException("Missing chunk " + i);
+                }
+                encoded.append(chunk);
+            }
+            return Base64.getDecoder().decode(encoded.toString());
+        }
+    }
+
+    private String fileTransferKey(String scope, String target, String sender, String fileName) {
+        return scope + "|" + target + "|" + sender + "|" + fileName;
+    }
+
+    private String findFileSessionKey(String scope, String target, String sender) {
+        if (scope.equalsIgnoreCase("group")) {
+            return keyForGroup(target);
+        }
+        return sender.equalsIgnoreCase(username) ? keyForPrivate(target) : keyForPrivate(sender);
+    }
+
+    private void showSaveDialogAndWriteFile(byte[] data, String fileName) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setSelectedFile(new File(fileName));
+                int result = chooser.showSaveDialog(chatClientUI.this);
+                if (result == JFileChooser.APPROVE_OPTION) {
+                    File selected = chooser.getSelectedFile();
+                    Files.write(selected.toPath(), data);
+                    appendWelcome("[System] Đã lưu file: " + selected.getAbsolutePath());
+                } else {
+                    appendWelcome("[System] Đã nhận file: " + fileName + " (chưa lưu)");
+                }
+            } catch (Exception ex) {
+                appendWelcome("[System] Không thể lưu file: " + fileName);
+            }
+        });
+    }
+
+    private void handleFileMetaMessage(String msg) {
+        String[] parts = msg.split("\\|", 7);
+        if (parts.length < 7) return;
+
+        String scope = parts[1].trim();
+        String target = parts[2].trim();
+        String sender = parts[3].trim();
+        String fileName = parts[4].trim();
+        long fileSize = 0L;
+        int totalParts = 0;
+        try {
+            fileSize = Long.parseLong(parts[5].trim());
+            totalParts = Integer.parseInt(parts[6].trim());
+        } catch (NumberFormatException ignored) { }
+
+        String sessionKey = findFileSessionKey(scope, target, sender);
+        if (scope.equalsIgnoreCase("private") && sender.equalsIgnoreCase(username)) {
+            if (!sessions.containsKey(sessionKey)) openPrivateTab(target, false);
+            sessions.get(sessionKey).appendLine("[File] Đã gửi " + fileName + " tới " + target + " (" + fileSize + " bytes)");
+            return;
+        }
+
+        if (scope.equalsIgnoreCase("group") && sender.equalsIgnoreCase(username)) {
+            if (!sessions.containsKey(sessionKey)) openGroupTab(target, false);
+            sessions.get(sessionKey).appendLine("[File] Bạn đã gửi " + fileName + " vào nhóm " + target + " (" + fileSize + " bytes)");
+            return;
+        }
+
+        if (!sessions.containsKey(sessionKey)) {
+            if (scope.equalsIgnoreCase("group")) {
+                openGroupTab(target, false);
+            } else {
+                openPrivateTab(sender, false);
+            }
+        }
+
+        ChatSessionPanel panel = sessions.get(sessionKey);
+        if (panel != null) {
+            panel.appendLine("[File] " + sender + " đang gửi " + fileName + " (" + fileSize + " bytes)");
+        }
+
+        String key = fileTransferKey(scope, target, sender, fileName);
+        incomingFiles.put(key, new IncomingFileTransfer(scope, target, sender, fileName, fileSize, totalParts));
+    }
+
+    private void handleFilePartMessage(String msg) {
+        String[] parts = msg.split("\\|", 7);
+        if (parts.length < 7) return;
+
+        String scope = parts[1].trim();
+        String target = parts[2].trim();
+        String sender = parts[3].trim();
+        String fileName = parts[4].trim();
+        int index;
+        try {
+            index = Integer.parseInt(parts[5].trim());
+        } catch (NumberFormatException ex) {
+            return;
+        }
+        String chunk = parts[6];
+
+        if (sender.equalsIgnoreCase(username)) {
+            return;
+        }
+
+        String key = fileTransferKey(scope, target, sender, fileName);
+        IncomingFileTransfer transfer = incomingFiles.get(key);
+        if (transfer == null) return;
+
+        transfer.chunks.put(index, chunk);
+        if (transfer.isComplete()) {
+            try {
+                byte[] data = transfer.assemble();
+                incomingFiles.remove(key);
+                String sessionKey = findFileSessionKey(scope, target, sender);
+                ChatSessionPanel panel = sessions.get(sessionKey);
+                if (panel != null) {
+                    panel.appendLine("[File] Nhận xong: " + fileName + " từ " + sender);
+                }
+                showSaveDialogAndWriteFile(data, fileName);
+            } catch (Exception ex) {
+                appendWelcome("[System] Lỗi ghép file: " + fileName);
+                incomingFiles.remove(key);
+            }
+        }
+    }
+
     // Panel representing one chat session (private or group)
     private class ChatSessionPanel extends JPanel {
         String target;
         boolean isGroup;
         JTextArea transcript;
-        JTextField input;
+        JTextArea input;
         JButton send;
 
         ChatSessionPanel(String target, boolean isGroup) {
@@ -326,19 +499,104 @@ public class chatClientUI extends JFrame {
                 @Override
                 public void mouseReleased(MouseEvent e) { if (e.isPopupTrigger()) showMenu(e); }
             });
-            input = new JTextField();
+            // multiline input with compact emoji picker
+            input = new JTextArea(3, 40);
+            input.setLineWrap(true);
+            input.setWrapStyleWord(true);
             send = new JButton("Send");
+            send.setMargin(new Insets(2, 8, 2, 8));
+            send.setPreferredSize(new Dimension(64, 30));
 
             JScrollPane sp = new JScrollPane(transcript);
+            JScrollPane inputScroll = new JScrollPane(input);
+
+            JButton fileButton = new JButton("📎");
+            fileButton.setMargin(new Insets(2, 8, 2, 8));
+            fileButton.setPreferredSize(new Dimension(40, 30));
+
+            JButton emojiPicker = new JButton("😊");
+            emojiPicker.setMargin(new Insets(2, 8, 2, 8));
+            emojiPicker.setPreferredSize(new Dimension(40, 30));
+
+            JPopupMenu emojiMenu = new JPopupMenu();
+            JPanel emojiGrid = new JPanel(new GridLayout(2, 5, 4, 4));
+            emojiGrid.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
+            String[] emojis = {"😀", "😂", "😍", "👍", "🎉", "❤️", "😮", "😢", "😎", "🔥"};
+            for (String em : emojis) {
+                JButton emojiItem = new JButton(em);
+                emojiItem.setMargin(new Insets(2, 4, 2, 4));
+                emojiItem.setFocusPainted(false);
+                emojiItem.setPreferredSize(new Dimension(36, 32));
+                emojiItem.addActionListener(ae -> {
+                    input.append(em);
+                    input.requestFocusInWindow();
+                    emojiMenu.setVisible(false);
+                });
+                emojiGrid.add(emojiItem);
+            }
+            emojiMenu.add(emojiGrid);
+            emojiPicker.addActionListener(ae -> emojiMenu.show(emojiPicker, 0, emojiPicker.getHeight()));
+
+            fileButton.addActionListener(ae -> sendFile());
+
             JPanel bottom = new JPanel(new BorderLayout());
-            bottom.add(input, BorderLayout.CENTER);
-            bottom.add(send, BorderLayout.EAST);
+            JPanel actionBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+            actionBar.add(fileButton);
+            actionBar.add(emojiPicker);
+            actionBar.add(send);
+
+            bottom.add(inputScroll, BorderLayout.CENTER);
+            bottom.add(actionBar, BorderLayout.EAST);
 
             add(sp, BorderLayout.CENTER);
             add(bottom, BorderLayout.SOUTH);
 
+            // Key bindings: Shift+Enter -> newline; Enter -> send if checkbox selected
+            InputMap im = input.getInputMap(JComponent.WHEN_FOCUSED);
+            ActionMap am = input.getActionMap();
+            im.put(KeyStroke.getKeyStroke("shift ENTER"), "insert-newline");
+            im.put(KeyStroke.getKeyStroke("ENTER"), "enter-pressed");
+            am.put("insert-newline", new AbstractAction() { public void actionPerformed(ActionEvent e) { input.append("\n"); } });
+            am.put("enter-pressed", new AbstractAction() { public void actionPerformed(ActionEvent e) {
+                if (enterSendCheckbox.isSelected()) sendFromPanel(); else input.append("\n");
+            } });
+
             send.addActionListener(e -> sendFromPanel());
-            input.addActionListener(e -> sendFromPanel());
+        }
+
+        private void sendFile() {
+            if (pw == null) return;
+            JFileChooser chooser = new JFileChooser();
+            int result = chooser.showOpenDialog(ChatSessionPanel.this);
+            if (result != JFileChooser.APPROVE_OPTION) return;
+
+            File selectedFile = chooser.getSelectedFile();
+            if (selectedFile == null || !selectedFile.exists()) return;
+
+            try {
+                byte[] fileBytes = Files.readAllBytes(selectedFile.toPath());
+                long maxBytes = 5L * 1024L * 1024L; // 5 MB limit
+                if (fileBytes.length > maxBytes) {
+                    showSystemNotice("[System] File quá lớn. Giới hạn 5 MB.");
+                    return;
+                }
+                String encoded = Base64.getEncoder().encodeToString(fileBytes);
+                int chunkSize = 3500;
+                int totalParts = (encoded.length() + chunkSize - 1) / chunkSize;
+                String scope = isGroup ? "group" : "private";
+
+                appendLine("[File] Đang gửi " + selectedFile.getName() + " (" + fileBytes.length + " bytes)");
+                pw.println("FILEMETA|" + scope + "|" + target + "|" + username + "|" + selectedFile.getName() + "|" + fileBytes.length + "|" + totalParts);
+
+                for (int i = 0; i < totalParts; i++) {
+                    int start = i * chunkSize;
+                    int end = Math.min(start + chunkSize, encoded.length());
+                    String part = encoded.substring(start, end);
+                    pw.println("FILEPART|" + scope + "|" + target + "|" + username + "|" + selectedFile.getName() + "|" + i + "|" + part);
+                }
+            } catch (Exception ex) {
+                showSystemNotice("[System] Không thể gửi file: " + selectedFile.getName());
+            }
         }
 
         void appendLine(String line) {
@@ -399,10 +657,10 @@ public class chatClientUI extends JFrame {
                 String target = parts[2].trim();
                 if (type.equalsIgnoreCase("private")) {
                     openPrivateTab(target, false);
-                    pendingHistoryTabKey = keyForPrivate(target);
+                    pendingHistoryTabKeys.addLast(keyForPrivate(target));
                 } else if (type.equalsIgnoreCase("group")) {
                     openGroupTab(target, false);
-                    pendingHistoryTabKey = keyForGroup(target);
+                    pendingHistoryTabKeys.addLast(keyForGroup(target));
                 }
             }
         } else if (text.startsWith("/msg ")) {
@@ -414,7 +672,7 @@ public class chatClientUI extends JFrame {
                 openPrivateTab(target);
             }
         } else if (text.equalsIgnoreCase("/mygroups")) {
-            pendingHistoryTabKey = null;
+            activeHistoryTabKey = null;
         }
     }
 
@@ -480,6 +738,39 @@ public class chatClientUI extends JFrame {
                             }
                         }
                     }
+                    else if (msg.startsWith("FILEACK|")) {
+                        try {
+                            String[] parts = msg.split("\\|", 6);
+                            if (parts.length < 6) {
+                                appendWelcome(msg);
+                                continue;
+                            }
+                            String scope = parts[1].trim();
+                            String target = parts[2].trim();
+                            String fileName = parts[3].trim();
+                            String fileSize = parts[4].trim();
+                            String sessionKey = scope.equalsIgnoreCase("group") ? keyForGroup(target) : keyForPrivate(target);
+                            if (!sessions.containsKey(sessionKey)) {
+                                if (scope.equalsIgnoreCase("group")) {
+                                    openGroupTab(target, false);
+                                } else {
+                                    openPrivateTab(target, false);
+                                }
+                            }
+                            sessions.get(sessionKey).appendLine("[File] Đã gửi " + fileName + " tới " + target + " (" + fileSize + " bytes)");
+                        } catch (Exception ex) {
+                            appendWelcome(msg);
+                        }
+                    }
+                    else if (msg.startsWith("[System] File too large")) {
+                        showSystemNotice(msg);
+                    }
+                    else if (msg.startsWith("FILEMETA|")) {
+                        handleFileMetaMessage(msg);
+                    }
+                    else if (msg.startsWith("FILEPART|")) {
+                        handleFilePartMessage(msg);
+                    }
                     else if (msg.startsWith("[Private] from ")) {
                         // format: [Private] from alice: hello
                         try {
@@ -534,8 +825,11 @@ public class chatClientUI extends JFrame {
                     }
                     else if (msg.startsWith("[History]")) {
                         String historyText = msg.substring("[History]".length()).trim();
-                        if (pendingHistoryTabKey != null && sessions.containsKey(pendingHistoryTabKey)) {
-                            sessions.get(pendingHistoryTabKey).appendLine(historyText);
+                        if (msg.startsWith("[History] Last ")) {
+                            activeHistoryTabKey = pendingHistoryTabKeys.pollFirst();
+                        }
+                        if (activeHistoryTabKey != null && sessions.containsKey(activeHistoryTabKey)) {
+                            sessions.get(activeHistoryTabKey).appendLine(historyText);
                         } else {
                             appendWelcome(historyText);
                         }

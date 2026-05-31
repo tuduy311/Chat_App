@@ -59,6 +59,111 @@ public class ClientHandler extends Thread {
         }
     }
 
+    private void sendLine(Socket targetSocket, String line) {
+        try {
+            if (targetSocket == null) return;
+            PrintWriter out = new PrintWriter(targetSocket.getOutputStream(), true);
+            out.println(line);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void handleFileMeta(String message) {
+        String[] parts = message.split("\\|", 7);
+        if (parts.length < 7) return;
+
+        String scope = parts[1].trim();
+        String target = parts[2].trim();
+        String sender = parts[3].trim();
+        String fileName = parts[4].trim();
+        String fileSize = parts[5].trim();
+        String chunkCount = parts[6].trim();
+        String fileInfo = fileName + " (" + fileSize + " bytes)";
+
+        // Enforce server-side max file size of 5 MB
+        try {
+            long size = Long.parseLong(fileSize);
+            long max = 5L * 1024L * 1024L;
+            if (size > max) {
+                pw.println("[System] File too large, limit is 5MB");
+                return;
+            }
+        } catch (NumberFormatException ignored) { }
+
+        if (scope.equalsIgnoreCase("private")) {
+            Socket targetSocket = Server.nameToSocket.get(target);
+            if (targetSocket == null) {
+                pw.println("[System] User " + target + " not online, file not sent");
+                return;
+            }
+
+            try {
+                Integer senderId = DatabaseManager.getUserIdByUsername(sender);
+                Integer receiverId = DatabaseManager.getUserIdByUsername(target);
+                if (senderId != null && receiverId != null) {
+                    DatabaseManager.savePrivateFileReturnId(senderId, receiverId, fileInfo);
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+
+            sendLine(targetSocket, message);
+            pw.println("FILEACK|private|" + target + "|" + fileName + "|" + fileSize + "|" + chunkCount);
+            return;
+        }
+
+        if (scope.equalsIgnoreCase("group")) {
+            List<Socket> members = Server.groupMember.get(target);
+            if (members == null || members.isEmpty()) {
+                pw.println("[System] Group " + target + " has no online members");
+                return;
+            }
+
+            try {
+                Integer senderId = DatabaseManager.getUserIdByUsername(sender);
+                Integer groupId = DatabaseManager.getGroupIdByName(target);
+                if (senderId != null && groupId != null) {
+                    DatabaseManager.saveGroupFileReturnId(groupId, senderId, fileInfo);
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+
+            for (Socket memberSocket : members) {
+                sendLine(memberSocket, message);
+            }
+            return;
+        }
+
+        pw.println("[System] Invalid file scope: " + scope);
+    }
+
+    private void handleFilePart(String message) {
+        String[] parts = message.split("\\|", 7);
+        if (parts.length < 7) return;
+
+        String scope = parts[1].trim();
+        String target = parts[2].trim();
+        String sender = parts[3].trim();
+        String fileName = parts[4].trim();
+
+        if (scope.equalsIgnoreCase("private")) {
+            Socket targetSocket = Server.nameToSocket.get(target);
+            if (targetSocket == null) return;
+            sendLine(targetSocket, message);
+            return;
+        }
+
+        if (scope.equalsIgnoreCase("group")) {
+            List<Socket> members = Server.groupMember.get(target);
+            if (members == null || members.isEmpty()) return;
+            for (Socket memberSocket : members) {
+                sendLine(memberSocket, message);
+            }
+        }
+    }
+
     @Override
     public void run() {
         try {
@@ -106,6 +211,16 @@ public class ClientHandler extends Thread {
                 // - /history, /createGroup, /join, /leave, /delete: system commands from the client command bar
                 // - /msg <user> <text>: private chat from a private tab
                 // - /<group> <text>: group chat from a group tab
+                if (message.startsWith("FILEMETA|")) {
+                    handleFileMeta(message);
+                    continue;
+                }
+
+                if (message.startsWith("FILEPART|")) {
+                    handleFilePart(message);
+                    continue;
+                }
+
                 if (message.startsWith("/history")) {
                     String[] parts = message.split(" ", 3);
                     if (parts.length >= 3) {

@@ -306,9 +306,15 @@ public class DatabaseManager {
     public static List<String> getRecentPrivateContacts(int userId, int limit) {
         List<String> out = new ArrayList<>();
         String query = "SELECT u.username FROM ("
-                + "  SELECT CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_id, MAX(created_at) AS last_at"
-                + "  FROM messages"
-                + "  WHERE sender_id = ? OR receiver_id = ?"
+                + "  SELECT other_id, MAX(last_at) AS last_at FROM ("
+                + "    SELECT CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_id, created_at AS last_at"
+                + "    FROM messages"
+                + "    WHERE sender_id = ? OR receiver_id = ?"
+                + "    UNION ALL"
+                + "    SELECT CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_id, uploaded_at AS last_at"
+                + "    FROM files"
+                + "    WHERE sender_id = ? OR receiver_id = ?"
+                + "  ) activity"
                 + "  GROUP BY other_id"
                 + "  ORDER BY last_at DESC"
                 + "  LIMIT ?"
@@ -318,7 +324,10 @@ public class DatabaseManager {
             ps.setInt(1, userId);
             ps.setInt(2, userId);
             ps.setInt(3, userId);
-            ps.setInt(4, limit);
+            ps.setInt(4, userId);
+            ps.setInt(5, userId);
+            ps.setInt(6, userId);
+            ps.setInt(7, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     out.add(rs.getString("username"));
@@ -368,6 +377,46 @@ public class DatabaseManager {
             ps.setInt(1, groupId);
             ps.setInt(2, userId);
             ps.setString(3, message);
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                try (ResultSet keys = ps.getGeneratedKeys()) {
+                    if (keys.next()) return keys.getInt(1);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    // Save private file metadata and return generated id
+    public static Integer savePrivateFileReturnId(int senderId, int receiverId, String fileInfo) {
+        String query = "INSERT INTO files (sender_id, receiver_id, group_id, file_path) VALUES (?, ?, NULL, ?)";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query, PreparedStatement.RETURN_GENERATED_KEYS)) {
+            ps.setInt(1, senderId);
+            ps.setInt(2, receiverId);
+            ps.setString(3, fileInfo);
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                try (ResultSet keys = ps.getGeneratedKeys()) {
+                    if (keys.next()) return keys.getInt(1);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    // Save group file metadata and return generated id
+    public static Integer saveGroupFileReturnId(int groupId, int senderId, String fileInfo) {
+        String query = "INSERT INTO files (sender_id, receiver_id, group_id, file_path) VALUES (?, NULL, ?, ?)";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(query, PreparedStatement.RETURN_GENERATED_KEYS)) {
+            ps.setInt(1, senderId);
+            ps.setInt(2, groupId);
+            ps.setString(3, fileInfo);
             int rows = ps.executeUpdate();
             if (rows > 0) {
                 try (ResultSet keys = ps.getGeneratedKeys()) {
@@ -442,22 +491,37 @@ public class DatabaseManager {
 
     // Get private chat history between two users (most recent first)
     public static List<String> getPrivateHistory(int userAId, int userBId, int limit) {
-        String query = "SELECT id, sender_id, message, created_at FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at DESC LIMIT ?";
         List<String> out = new ArrayList<>();
+        String query = "SELECT event_type, event_id, sender_id, body FROM ("
+                + " SELECT 0 AS event_type, id AS event_id, sender_id, message AS body, created_at AS event_time"
+                + " FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)"
+                + " UNION ALL"
+                + " SELECT 1 AS event_type, id AS event_id, sender_id, file_path AS body, uploaded_at AS event_time"
+                + " FROM files WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)"
+                + ") t ORDER BY event_time DESC, event_type DESC, event_id DESC LIMIT ?";
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(query)) {
             ps.setInt(1, userAId);
             ps.setInt(2, userBId);
             ps.setInt(3, userBId);
             ps.setInt(4, userAId);
-            ps.setInt(5, limit);
+            ps.setInt(5, userAId);
+            ps.setInt(6, userBId);
+            ps.setInt(7, userBId);
+            ps.setInt(8, userAId);
+            ps.setInt(9, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    int messageId = rs.getInt("id");
+                    int eventType = rs.getInt("event_type");
+                    int messageId = rs.getInt("event_id");
                     int senderId = rs.getInt("sender_id");
-                    String msg = rs.getString("message");
+                    String body = rs.getString("body");
                     String senderName = getUserById(senderId) != null ? getUserById(senderId).getUsername() : "unknown";
-                    out.add(senderName + ": " + msg + " [#" + messageId + "]");
+                    if (eventType == 0) {
+                        out.add(senderName + ": " + body + " [#" + messageId + "]");
+                    } else {
+                        out.add(senderName + ": [File] " + body + " [file#" + messageId + "]");
+                    }
                 }
             }
         } catch (SQLException e) {
@@ -468,19 +532,31 @@ public class DatabaseManager {
 
     // Get group chat history (most recent first)
     public static List<String> getGroupHistory(int groupId, int limit) {
-        String query = "SELECT id, user_id, message, created_at FROM group_messages WHERE group_id = ? ORDER BY created_at DESC LIMIT ?";
         List<String> out = new ArrayList<>();
+        String query = "SELECT event_type, event_id, user_id, body FROM ("
+                + " SELECT 0 AS event_type, id AS event_id, user_id, message AS body, created_at AS event_time"
+                + " FROM group_messages WHERE group_id = ?"
+                + " UNION ALL"
+                + " SELECT 1 AS event_type, id AS event_id, sender_id AS user_id, file_path AS body, uploaded_at AS event_time"
+                + " FROM files WHERE group_id = ?"
+                + ") t ORDER BY event_time DESC, event_type DESC, event_id DESC LIMIT ?";
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(query)) {
             ps.setInt(1, groupId);
-            ps.setInt(2, limit);
+            ps.setInt(2, groupId);
+            ps.setInt(3, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    int messageId = rs.getInt("id");
+                    int eventType = rs.getInt("event_type");
+                    int messageId = rs.getInt("event_id");
                     int userId = rs.getInt("user_id");
-                    String msg = rs.getString("message");
+                    String body = rs.getString("body");
                     String senderName = getUserById(userId) != null ? getUserById(userId).getUsername() : "unknown";
-                    out.add(senderName + ": " + msg + " [#" + messageId + "]");
+                    if (eventType == 0) {
+                        out.add(senderName + ": " + body + " [#" + messageId + "]");
+                    } else {
+                        out.add(senderName + ": [File] " + body + " [file#" + messageId + "]");
+                    }
                 }
             }
         } catch (SQLException e) {
