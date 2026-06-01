@@ -5,8 +5,11 @@ Xây dựng 1 chương trình chat với Java với các chức năng sau:
 - Đăng ký chat user (đăng ký từ ứng dụng client), đăng nhập sau đăng ký.
 - Chương trình cho phép một user có thể chat với nhiều user khác (đang online) cùng lúc.
 - Chương trình cho phép user tạo các group chat và chat trong các group này.
-- Cho phép gởi file trong khi chat.
+- Cho phép gửi file trong khi chat và lưu metadata để xem lại trong lịch sử.
 - Cho người dùng xem lịch sử chat của mình, xoá các dòng lịch sử chat.
+- Có bảng chọn server trước khi vào chat, hỗ trợ Connect / Disconnect và lưu cấu hình local.
+- Có giao diện quản trị server để kiểm tra trạng thái, danh sách client và log.
+- Có một số tiện ích giao diện như Enter gửi, emoji, và click-to-save khi nhận file.
 
 ## Công nghệ
 - **Backend**: Java Core (Socket Programming, Multithreading)
@@ -63,6 +66,9 @@ chat_app/
 - [x] Cho phép Enter gửi hoặc xuống dòng trong ô chat
 - [x] Cho phép chèn emoji đơn giản trong ô chat
 - [x] File gửi được lưu metadata vào DB và hiển thị lại trong lịch sử chat
+- [x] Bảng chọn server trước khi vào chat, hỗ trợ Add/Edit/Remove/Connect và lưu local
+- [x] Server GUI
+- [x] Client server list config
 
 Ghi chú ngắn:
 - **Tự động phục hồi**: khi đăng nhập lại client sẽ tự mở các tab private gần đây và tự yêu cầu lịch sử tương ứng.
@@ -74,11 +80,6 @@ Ghi chú ngắn:
 - [x] JDBC connection (.env auth)
 - [x] Lưu user và nhóm chat vào database
 - [x] Lưu lịch sử chat private/group
-
-### Todo - ⏳
-- [~] File transfer (đang triển khai — thiết kế tạm: Base64 chunk qua giao thức text)
-- [ ] Server GUI
-- [ ] Client server list config
 
 ## Setup
 ### 1. Yêu cầu
@@ -156,13 +157,21 @@ mvn exec:java
 # hoặc
 mvn exec:java "-Dexec.mainClass=server.Server"
 ```
+## Server Dashboard (GUI)
+
+Một giao diện quản trị nhỏ đã được thêm vào để tiện quản lý và debug server:
+- Hiển thị cấu hình (port), trạng thái server (RUNNING / STOPPED).
+- Nút `Open Server` / `Close Server` để bật/tắt server socket trực tiếp từ GUI.
+- Danh sách client đang kết nối (tên user) và số lượng client.
+- Log ngắn hiển thị các sự kiện (connect, disconnect, errors).
+- Nút `Check DB` để kiểm tra kết nối tới MySQL.
+
+Khi dashboard mở, bấm `Open Server` (hoặc chỉnh port) để bắt đầu chấp nhận client. GUI sẽ tự động cập nhật danh sách client khi có người kết nối/rời.
+
 
 Output khi thành công:
 ```
-MySQL JDBC Driver loaded successfully
-✓ Database connection successful!
 Server started on port 8080
-Waiting for clients...
 ```
 
 ### Start Client GUI
@@ -174,7 +183,12 @@ mvn exec:java "-Dexec.mainClass=client.chatClientUI"
 ```
 
 Trong client GUI:
-- Gõ lệnh hệ thống như `/createGroup`, `/join`, `/leave`, `/history`, `/delete` ở ô `Command` phía trên danh sách tab.
+- Khi vừa mở client, bạn sẽ thấy **bảng chọn server** trước khi vào chat.
+- Dùng `Add`, `Edit`, `Remove` để quản lý danh sách server; cấu hình được lưu local trong file `.servers.cfg` ở thư mục gốc project.
+- Chọn một dòng trong bảng rồi bấm `Connect` để vào giao diện chat.
+- Sau khi kết nối thành công, client mới hiển thị phần chat, danh sách online/group và các tab hội thoại.
+- Nút `Disconnect` nằm trên thanh điều khiển phía trên khu chat để ngắt kết nối và quay lại bảng chọn server.
+- Gõ lệnh hệ thống như `/createGroup`, `/join`, `/leave`, `/history`, `/delete` ở ô `Command` phía trên danh sách tab sau khi đã kết nối.
 - Gõ tin nhắn riêng hoặc tin nhắn nhóm trong ô nhập ở từng tab chat.
 - Ô chat hỗ trợ nhiều dòng; bật/tắt `Enter sends` để chọn Enter là gửi hoặc xuống dòng.
 - Có thanh emoji đơn giản để chèn nhanh 10 emoji cơ bản, gồm tim, vui, buồn và các biểu tượng phổ biến khác.
@@ -184,6 +198,14 @@ Trong client GUI:
 - `/history private <username>` và `/history group <groupname>` sẽ hiển thị trong tab tương ứng.
 - Khi đăng nhập lại, client sẽ tự mở lại các cuộc chat gần đây và nạp lịch sử cũ.
 - File đã gửi sẽ được lưu metadata vào bảng `files` và cũng hiện lại trong `/history` như một dòng file riêng.
+- Khi client nhận file, file sẽ được ghép nhưng sẽ không mở hộp thoại `Save` ngay lập tức; thay vào đó UI sẽ hiển thị nút `Save` trong khung chat để người dùng bấm khi muốn lưu (click-to-save).
+- Khi xoá tin nhắn từ giao diện, client sẽ hiển thị hộp thoại xác nhận trước khi gửi lệnh xoá tới server.
+
+Cách dùng nhanh:
+1. Mở client GUI.
+2. Chọn server trong bảng. Nếu chưa có server, bấm `Add`.
+3. Bấm `Connect` để vào chat.
+4. Chat xong thì bấm `Disconnect` để quay lại màn hình chọn server.
 
 Test commands trong client:
 Lệnh (cú pháp, ví dụ, hành vi)
@@ -233,8 +255,17 @@ Ghi chú:
 - Nếu mục lịch sử không có `[#id]` thì không thể xóa trên server (chỉ ẩn cục bộ).
 ```
 
-## Phát Triển Tiếp Theo
+### Server list config
 
-1. **Server GUI** - màn hình quản lý server và client connected
-2. **Client server list config** - lưu danh sách server và chọn server để kết nối
+Client lưu danh sách server trong file `.servers.cfg` ở thư mục gốc project. Ví dụ:
 
+```text
+local=localhost:8080
+office=192.168.1.10:8080
+```
+
+Bạn có thể quản lý file này qua UI, không cần sửa tay trừ khi muốn sao lưu hoặc reset nhanh.
+
+### Ghi chú về server list
+
+Phần server list hiện tại là lớp giao diện chọn kết nối cho client. Dữ liệu chat, lịch sử và DB vẫn dùng backend hiện có; nếu muốn tách dữ liệu theo từng server riêng biệt thì đó là hướng phát triển thêm ở backend, chưa phải chức năng hoàn thiện.

@@ -166,6 +166,7 @@ public class ClientHandler extends Thread {
 
     @Override
     public void run() {
+        boolean disconnectLogged = false;
         try {
             br = new BufferedReader (
                 new InputStreamReader(socket.getInputStream()));
@@ -174,8 +175,9 @@ public class ClientHandler extends Thread {
             username = br.readLine(); // dòng đầu tiên lấy username
 
             Server.userMap.put(socket, username);
-            System.out.println("User connected: " + username);
             Server.nameToSocket.put(username, socket);
+            Server.log("User connected: " + username);
+            Server.refreshDashboard();
 
             // Restore current memberships from DB so the user only sees active groups.
             Integer userId = DatabaseManager.getUserIdByUsername(username);
@@ -207,6 +209,12 @@ public class ClientHandler extends Thread {
           
             String message;
             while ((message = br.readLine()) != null) {
+                if (message.equalsIgnoreCase("/quit")) {
+                    Server.log(username + " disconnected");
+                    disconnectLogged = true;
+                    break;
+                }
+
                 // Command routing:
                 // - /history, /createGroup, /join, /leave, /delete: system commands from the client command bar
                 // - /msg <user> <text>: private chat from a private tab
@@ -481,15 +489,23 @@ public class ClientHandler extends Thread {
         }
         catch (Exception e) {
            // e.printStackTrace();
-            System.out.println(username + " disconnected");
+            Server.log(username + " disconnected");
+            disconnectLogged = true;
         }
         finally {
             try {
                 Server.userMap.remove(socket);
+                if (username != null) {
+                    Server.nameToSocket.remove(username);
+                }
                 Server.removeClient(socket);
                 socket.close();
+                if (!disconnectLogged && username != null) {
+                    Server.log(username + " disconnected");
+                }
                // Server.broadcast("[SYSTEM] " + user + " left", socket);
                 Server.broadcastOnline();
+                Server.refreshDashboard();
             }
             catch (Exception e) {
                 e.printStackTrace();

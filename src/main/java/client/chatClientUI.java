@@ -6,12 +6,15 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import javax.swing.table.DefaultTableModel;
 
 
 
@@ -34,6 +37,19 @@ public class chatClientUI extends JFrame {
     JTextArea onlineArea;
     JTextArea groupArea;
 
+    // Server list management
+    LinkedHashMap<String,String> serverMap; // label -> host:port
+    JTable serverTable;
+    DefaultTableModel serverTableModel;
+    JButton addServerBtn, editServerBtn, removeServerBtn, connectBtn, disconnectBtn;
+    JLabel serverInfoLabel;
+    CardLayout rootCards;
+    JPanel rootPanel;
+    JPanel chatPanel;
+    JPanel chatWorkspacePanel;
+    JPanel serverChooserPanel;
+    boolean receiverRunning;
+
     Socket socket;
     PrintWriter pw;
     BufferedReader br;
@@ -44,8 +60,6 @@ public class chatClientUI extends JFrame {
     public chatClientUI(String username) {
         this.username = username;
         initUI();
-        connectServer();
-        receiveMessages();
     }
     
     // Old constructor for backward compatibility (shows prompt)
@@ -53,8 +67,6 @@ public class chatClientUI extends JFrame {
         username = JOptionPane.showInputDialog("Enter username:");
        
         initUI();
-        connectServer();
-        receiveMessages();
     }
 
     private void initUI() {
@@ -63,6 +75,8 @@ public class chatClientUI extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
        
         setLayout(new BorderLayout());
+        rootCards = new CardLayout();
+        rootPanel = new JPanel(rootCards);
 
         // ____________ Left panel: Online users _______________
         onlineArea = new JTextArea();
@@ -113,17 +127,108 @@ public class chatClientUI extends JFrame {
         welcomePanel.add(topRightBar, BorderLayout.SOUTH);
         chatTabs.addTab("Welcome", welcomePanel);
 
-        rightPanel.add(commandBar, BorderLayout.NORTH);
-        rightPanel.add(chatTabs, BorderLayout.CENTER);
+        // Server list panel above the global command bar
+        serverMap = new LinkedHashMap<>();
+        loadServers();
+        if (serverMap.isEmpty()) {
+            serverMap.put("local", "localhost:8080");
+        }
+        serverChooserPanel = new JPanel(new BorderLayout(8, 8));
+        JPanel chooserHeader = new JPanel(new BorderLayout());
+        chooserHeader.add(new JLabel("Chọn server trước khi vào chat"), BorderLayout.WEST);
+        serverInfoLabel = new JLabel("Not connected");
+        chooserHeader.add(serverInfoLabel, BorderLayout.EAST);
 
+        serverTableModel = new DefaultTableModel(new Object[]{"Label", "Host", "Port"}, 0) {
+            @Override public boolean isCellEditable(int row, int column) { return false; }
+        };
+        serverTable = new JTable(serverTableModel);
+        serverTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        refreshServerTable();
+        if (serverTable.getRowCount() > 0) {
+            serverTable.setRowSelectionInterval(0, 0);
+        }
 
+        JScrollPane serverScroll = new JScrollPane(serverTable);
+        JPanel serverActionBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        addServerBtn = new JButton("Add");
+        editServerBtn = new JButton("Edit");
+        removeServerBtn = new JButton("Remove");
+        connectBtn = new JButton("Connect");
+        disconnectBtn = new JButton("Disconnect");
+        serverActionBar.add(addServerBtn);
+        serverActionBar.add(editServerBtn);
+        serverActionBar.add(removeServerBtn);
+        serverActionBar.add(connectBtn);
+        serverChooserPanel.add(chooserHeader, BorderLayout.NORTH);
+        serverChooserPanel.add(serverScroll, BorderLayout.CENTER);
+        serverChooserPanel.add(serverActionBar, BorderLayout.SOUTH);
+
+        addServerBtn.addActionListener(e -> {
+            String label = JOptionPane.showInputDialog(this, "Label:", "Add Server", JOptionPane.PLAIN_MESSAGE);
+            if (label == null || label.trim().isEmpty()) return;
+            String host = JOptionPane.showInputDialog(this, "Host (e.g. localhost):", "localhost");
+            if (host == null || host.trim().isEmpty()) return;
+            String port = JOptionPane.showInputDialog(this, "Port:", "8080");
+            if (port == null || port.trim().isEmpty()) return;
+            serverMap.put(label.trim(), host.trim()+":"+port.trim());
+            saveServers();
+            refreshServerTable();
+        });
+
+        editServerBtn.addActionListener(e -> {
+            String sel = selectedServerLabel();
+            if (sel == null) return;
+            String val = serverMap.get(sel);
+            if (val == null) return;
+            String[] parts = val.split(":", 2);
+            String host = JOptionPane.showInputDialog(this, "Host:", parts.length>0?parts[0]:"localhost");
+            if (host == null) return;
+            String port = JOptionPane.showInputDialog(this, "Port:", parts.length>1?parts[1]:"8080");
+            if (port == null) return;
+            serverMap.put(sel, host.trim()+":"+port.trim());
+            saveServers();
+            refreshServerTable();
+        });
+
+        removeServerBtn.addActionListener(e -> {
+            String sel = selectedServerLabel();
+            if (sel == null) return;
+            int r = JOptionPane.showConfirmDialog(this, "Remove server '"+sel+"'?","Confirm", JOptionPane.YES_NO_OPTION);
+            if (r==JOptionPane.YES_OPTION) {
+                serverMap.remove(sel);
+                saveServers();
+                refreshServerTable();
+            }
+        });
+
+        connectBtn.addActionListener(e -> connectToSelectedServer());
+        disconnectBtn.addActionListener(e -> disconnectFromServer());
+
+        chatPanel = new JPanel(new BorderLayout());
+        JPanel topCombined = new JPanel(new BorderLayout());
+        JPanel chatControlBar = new JPanel(new BorderLayout(8, 0));
+        chatControlBar.add(commandBar, BorderLayout.CENTER);
+        JPanel disconnectWrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        disconnectWrap.add(disconnectBtn);
+        chatControlBar.add(disconnectWrap, BorderLayout.EAST);
+        topCombined.add(chatControlBar, BorderLayout.SOUTH);
+        chatPanel.add(topCombined, BorderLayout.NORTH);
+        chatPanel.add(chatTabs, BorderLayout.CENTER);
+
+        rootPanel.add(serverChooserPanel, "servers");
+        chatWorkspacePanel = new JPanel(new BorderLayout());
 
         // split UI
         JSplitPane splitPane = new JSplitPane(
-            JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel
+            JSplitPane.HORIZONTAL_SPLIT, leftPanel, chatPanel
         );
         splitPane.setDividerLocation(200);
-        add(splitPane, BorderLayout.CENTER);
+        chatWorkspacePanel.add(splitPane, BorderLayout.CENTER);
+
+        rootPanel.add(chatWorkspacePanel, "chat");
+        add(rootPanel, BorderLayout.CENTER);
+        rootCards.show(rootPanel, "servers");
 
 
 
@@ -420,9 +525,11 @@ public class chatClientUI extends JFrame {
                 String sessionKey = findFileSessionKey(scope, target, sender);
                 ChatSessionPanel panel = sessions.get(sessionKey);
                 if (panel != null) {
-                    panel.appendLine("[File] Nhận xong: " + fileName + " từ " + sender);
+                    panel.appendLine("[File] Nhận xong: " + fileName + " từ " + sender + " — nhấn 'Save' để lưu.");
+                    panel.addReceivedFileButton(fileName, data, key);
+                } else {
+                    appendWelcome("[File] Nhận xong: " + fileName + " từ " + sender + " — use /history to view.");
                 }
-                showSaveDialogAndWriteFile(data, fileName);
             } catch (Exception ex) {
                 appendWelcome("[System] Lỗi ghép file: " + fileName);
                 incomingFiles.remove(key);
@@ -437,6 +544,7 @@ public class chatClientUI extends JFrame {
         JTextArea transcript;
         JTextArea input;
         JButton send;
+        JPanel fileBar;
 
         ChatSessionPanel(String target, boolean isGroup) {
             super(new BorderLayout());
@@ -479,9 +587,14 @@ public class chatClientUI extends JFrame {
                         JMenuItem del = new JMenuItem("Delete Message");
                         del.addActionListener(ae -> {
                             if (foundId != null) {
-                                String scope = isGroup ? "group" : "private";
-                                // send scope-aware delete command so the server can decide global vs local delete
-                                sendRawCommand("/delete " + scope + " " + foundId);
+                                int resp = JOptionPane.showConfirmDialog(chatClientUI.this,
+                                        "Xác nhận xoá tin nhắn id=" + foundId + "?","Xác nhận xoá",
+                                        JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                                if (resp == JOptionPane.YES_OPTION) {
+                                    String scope = isGroup ? "group" : "private";
+                                    // send scope-aware delete command so the server can decide global vs local delete
+                                    sendRawCommand("/delete " + scope + " " + foundId);
+                                }
                             } else {
                                 appendWelcome("[System] No message id found on this line");
                             }
@@ -539,12 +652,17 @@ public class chatClientUI extends JFrame {
 
             fileButton.addActionListener(ae -> sendFile());
 
+            // small file bar above input: holds Save buttons for received files (click-to-save)
+            fileBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+            fileBar.setVisible(false);
+
             JPanel bottom = new JPanel(new BorderLayout());
             JPanel actionBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
             actionBar.add(fileButton);
             actionBar.add(emojiPicker);
             actionBar.add(send);
 
+            bottom.add(fileBar, BorderLayout.NORTH);
             bottom.add(inputScroll, BorderLayout.CENTER);
             bottom.add(actionBar, BorderLayout.EAST);
 
@@ -562,6 +680,25 @@ public class chatClientUI extends JFrame {
             } });
 
             send.addActionListener(e -> sendFromPanel());
+        }
+
+        void addReceivedFileButton(String fileName, byte[] data, String fileKey) {
+            SwingUtilities.invokeLater(() -> {
+                JButton btn = new JButton("Save: " + fileName);
+                btn.setMargin(new Insets(2,6,2,6));
+                btn.addActionListener(ae -> {
+                    // call outer class method to show save dialog and write file
+                    chatClientUI.this.showSaveDialogAndWriteFile(data, fileName);
+                    fileBar.remove(btn);
+                    if (fileBar.getComponentCount() == 0) fileBar.setVisible(false);
+                    fileBar.revalidate();
+                    fileBar.repaint();
+                });
+                fileBar.add(btn);
+                fileBar.setVisible(true);
+                fileBar.revalidate();
+                fileBar.repaint();
+            });
         }
 
         private void sendFile() {
@@ -676,23 +813,122 @@ public class chatClientUI extends JFrame {
         }
     }
 
+    // Server config persistence (simple key=value lines)
+    private Path serversConfigPath() {
+        return Paths.get(".servers.cfg");
+    }
+
+    private void loadServers() {
+        try {
+            Path p = serversConfigPath();
+            serverMap.clear();
+            if (Files.exists(p)) {
+                for (String line : Files.readAllLines(p)) {
+                    String s = line.trim();
+                    if (s.isEmpty() || s.startsWith("#")) continue;
+                    int idx = s.indexOf('=');
+                    if (idx > 0) {
+                        String k = s.substring(0, idx).trim();
+                        String v = s.substring(idx+1).trim();
+                        serverMap.put(k, v);
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            // ignore
+        }
+    }
+
+    private void refreshServerTable() {
+        if (serverTableModel == null) return;
+        serverTableModel.setRowCount(0);
+        for (Map.Entry<String, String> entry : serverMap.entrySet()) {
+            String[] parts = entry.getValue().split(":", 2);
+            String host = parts.length > 0 ? parts[0] : "localhost";
+            String port = parts.length > 1 ? parts[1] : "8080";
+            serverTableModel.addRow(new Object[]{entry.getKey(), host, port});
+        }
+    }
+
+    private String selectedServerLabel() {
+        if (serverTable == null) return null;
+        int row = serverTable.getSelectedRow();
+        if (row < 0) return null;
+        Object value = serverTableModel.getValueAt(row, 0);
+        return value == null ? null : value.toString();
+    }
+
+    private void saveServers() {
+        try {
+            Path p = serversConfigPath();
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<String,String> e : serverMap.entrySet()) {
+                sb.append(e.getKey()).append("=").append(e.getValue()).append("\n");
+            }
+            Files.write(p, sb.toString().getBytes());
+        } catch (Exception ex) {
+            // ignore
+        }
+    }
+
+    private void connectToSelectedServer() {
+        String sel = selectedServerLabel();
+        if (sel == null && !serverMap.isEmpty()) {
+            sel = serverMap.keySet().iterator().next();
+        }
+        if (sel == null) return;
+        String val = serverMap.get(sel);
+        if (val == null) val = "localhost:8080";
+        String[] parts = val.split(":", 2);
+        String host = parts.length>0?parts[0] : "localhost";
+        int port = 8080;
+        try { if (parts.length>1) port = Integer.parseInt(parts[1]); } catch (Exception ex) { port = 8080; }
+        connectServer(host, port);
+    }
+
+    private void disconnectFromServer() {
+        try {
+            if (pw != null) {
+                pw.println("/quit");
+                pw.flush();
+            }
+        } catch (Exception ex) { }
+        try { if (br != null) br.close(); } catch (Exception e) {}
+        try { if (pw != null) pw.close(); } catch (Exception e) {}
+        try { if (socket != null) socket.close(); } catch (Exception e) {}
+        socket = null; pw = null; br = null;
+        receiverRunning = false;
+        serverInfoLabel.setText("Disconnected");
+        appendWelcome("[System] Disconnected from server");
+        rootCards.show(rootPanel, "servers");
+    }
+
     
 
-    private void connectServer() {
+    private void connectServer(String host, int port) {
         try{
-            socket = new Socket("localhost", 8080);
+            socket = new Socket(host, port);
 
             pw = new PrintWriter(socket.getOutputStream(), true);
-            br = new BufferedReader( 
-                    new InputStreamReader(socket.getInputStream()));
+            br = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
             // set window title and send username
-            setTitle("ChatApp - " + username);
+            setTitle("ChatApp - " + username + " @ " + host + ":" + port);
             pw.println(username);
+            serverInfoLabel.setText("Connected: " + host + ":" + port);
+            appendWelcome("[System] Connected to " + host + ":" + port);
+            rootCards.show(rootPanel, "chat");
+            if (!receiverRunning) {
+                receiverRunning = true;
+                receiveMessages();
+            }
 
         }
         catch(Exception e) {
-            e.printStackTrace();
+            appendWelcome("[System] Could not connect to " + host + ":" + port + " — " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Could not connect to " + host + ":" + port + "\n" + e.getMessage(), "Connection Failed", JOptionPane.ERROR_MESSAGE);
+            serverInfoLabel.setText("Not connected");
+            rootCards.show(rootPanel, "servers");
         }
     }
 
