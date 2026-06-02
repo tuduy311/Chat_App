@@ -157,6 +157,24 @@ mvn exec:java
 # hoặc
 mvn exec:java "-Dexec.mainClass=server.Server"
 ```
+
+### Run from JAR (executable JAR)
+
+Sau khi `mvn package` hoặc `mvn clean package` bạn sẽ có file JAR trong `target/`.
+
+- Nếu JAR có `Main-Class` trỏ tới server (mặc định trong pom):
+
+```powershell
+java -jar target/chat_app-1.0.jar
+```
+
+- Để chạy client GUI từ cùng JAR (nếu JAR chứa class files):
+
+```powershell
+java -cp target/chat_app-1.0.jar client.chatClientUI
+```
+
+
 ## Server Dashboard (GUI)
 
 Một giao diện quản trị nhỏ đã được thêm vào để tiện quản lý và debug server:
