@@ -9,7 +9,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Base64;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Deque;
 import java.util.LinkedHashMap;
@@ -32,6 +36,9 @@ public class chatClientUI extends JFrame {
     Deque<String> pendingHistoryTabKeys;
     String activeHistoryTabKey;
     Map<String, IncomingFileTransfer> incomingFiles;
+    // track recent deletes to avoid duplicate system messages
+    Map<Integer, Long> recentDeletes = new LinkedHashMap<>();
+    final long DUPLICATE_DELETE_WINDOW_MS = 3000;
 
     JTextArea welcomeArea;
     JTextArea onlineArea;
@@ -545,10 +552,12 @@ public class chatClientUI extends JFrame {
         JTextArea input;
         JButton send;
         JPanel fileBar;
+        List<String> rawLines;
 
         ChatSessionPanel(String target, boolean isGroup) {
             super(new BorderLayout());
             this.target = target; this.isGroup = isGroup;
+            rawLines = new ArrayList<>();
             transcript = new JTextArea(); transcript.setEditable(false);
             // Add right-click context menu on transcript lines for Copy ID / Delete
             transcript.addMouseListener(new MouseAdapter() {
@@ -556,17 +565,30 @@ public class chatClientUI extends JFrame {
                     try {
                         int offset = transcript.viewToModel2D(e.getPoint());
                         int line = transcript.getLineOfOffset(offset);
-                        int start = transcript.getLineStartOffset(line);
-                        int end = transcript.getLineEndOffset(line);
-                        String lineText = transcript.getText().substring(start, end).trim();
-                        // find pattern [#123]
+                        // Prefer rawLines (contains original ids). Fallback to displayed text.
                         String id = null;
-                        int idx = lineText.indexOf("[#");
-                        if (idx >= 0) {
-                            int endIdx = lineText.indexOf(']', idx);
-                            if (endIdx > idx) {
-                                String inner = lineText.substring(idx+2, endIdx);
-                                if (inner.matches("\\d+")) id = inner;
+                        String raw = null;
+                        if (line >= 0 && line < rawLines.size()) raw = rawLines.get(line);
+                        if (raw != null) {
+                            int idx = raw.indexOf("[#");
+                            if (idx >= 0) {
+                                int endIdx = raw.indexOf(']', idx);
+                                if (endIdx > idx) {
+                                    String inner = raw.substring(idx+2, endIdx);
+                                    if (inner.matches("\\d+")) id = inner;
+                                }
+                            }
+                        } else {
+                            int start = transcript.getLineStartOffset(line);
+                            int end = transcript.getLineEndOffset(line);
+                            String lineText = transcript.getText().substring(start, end).trim();
+                            int idx = lineText.indexOf("[#");
+                            if (idx >= 0) {
+                                int endIdx = lineText.indexOf(']', idx);
+                                if (endIdx > idx) {
+                                    String inner = lineText.substring(idx+2, endIdx);
+                                    if (inner.matches("\\d+")) id = inner;
+                                }
                             }
                         }
                         final String foundId = id;
@@ -737,17 +759,48 @@ public class chatClientUI extends JFrame {
         }
 
         void appendLine(String line) {
-            transcript.append(line + "\n");
+            // keep raw line for id-based operations, but display without trailing [#id]
+            rawLines.add(line);
+            String display = line.replaceAll("\\s*\\[#\\d+\\]\\s*$", "");
+            transcript.append(display + "\n");
             transcript.setCaretPosition(transcript.getDocument().getLength());
         }
 
         void markDeleted(int messageId) {
             String marker = "[#" + messageId + "]";
+            // Try to find the line in rawLines that contains the marker
+            for (int i = 0; i < rawLines.size(); i++) {
+                String raw = rawLines.get(i);
+                if (raw != null && raw.contains(marker)) {
+                    // Build new transcript display from rawLines, replacing this line with [deleted]
+                    StringBuilder sb = new StringBuilder();
+                    for (int j = 0; j < rawLines.size(); j++) {
+                        String r = rawLines.get(j);
+                        String d = r == null ? "" : r.replaceAll("\\s*\\[#\\d+\\]\\s*$", "");
+                        if (j == i) {
+                            int colon = d.indexOf(":");
+                            if (colon >= 0) {
+                                String prefix = d.substring(0, colon+1);
+                                sb.append(prefix).append(" [deleted]");
+                            } else {
+                                sb.append("[deleted]");
+                            }
+                        } else {
+                            sb.append(d);
+                        }
+                        sb.append("\n");
+                    }
+                    transcript.setText(sb.toString());
+                    transcript.setCaretPosition(transcript.getDocument().getLength());
+                    return;
+                }
+            }
+
+            // Fallback: operate on displayed text (older messages without rawLines)
             String[] lines = transcript.getText().split("\n");
             StringBuilder sb = new StringBuilder();
             for (String l : lines) {
                 if (l.contains(marker)) {
-                    // Replace message body with [deleted]
                     int colon = l.indexOf(":");
                     if (colon >= 0) {
                         String prefix = l.substring(0, colon+1);
@@ -938,6 +991,21 @@ public class chatClientUI extends JFrame {
             try {
                 String msg;
                 while ((msg = br.readLine()) != null) {
+                    // Suppress duplicate human-readable system delete messages
+                    try {
+                        Matcher m = Pattern.compile(".*Message\\s+(\\d+)\\s+deleted.*", Pattern.CASE_INSENSITIVE).matcher(msg);
+                        if (m.matches()) {
+                            int did = Integer.parseInt(m.group(1));
+                            long now = System.currentTimeMillis();
+                            Long prev = recentDeletes.get(did);
+                            if (prev != null && now - prev < DUPLICATE_DELETE_WINDOW_MS) {
+                                recentDeletes.remove(did);
+                                continue; // skip duplicate system message
+                            }
+                        }
+                    } catch (Exception ex) {
+                        // ignore parse errors
+                    }
                     if (msg.startsWith("ONLINE:")) {
                         String users = msg.substring(7);
                         onlineArea.setText("Online:\n");
@@ -1088,6 +1156,13 @@ public class chatClientUI extends JFrame {
                                     p.markDeleted(id);
                                 }
                             }
+                            // record recent deletion to suppress duplicate system message
+                            try {
+                                long now = System.currentTimeMillis();
+                                recentDeletes.put(id, now);
+                                // prune old entries
+                                recentDeletes.entrySet().removeIf(en -> now - en.getValue() > DUPLICATE_DELETE_WINDOW_MS);
+                            } catch (Exception ignore) {}
                             if (msg.startsWith("[DeletedLocal] ")) {
                                 appendWelcome("[System] Message " + id + " removed only for you");
                             } else {
